@@ -31,7 +31,7 @@ python code/evaluation/validate_output.py output.csv dataset/deletion_requests.c
 ```
 
 ### Run Automated Unit and Regression Tests
-To execute all 14 unit, regression, and team-created test cases:
+To execute all 19 unit, regression, and hand-reviewed fixture tests:
 
 ```bash
 pytest code/tests/test_audit.py
@@ -55,23 +55,31 @@ code/
 ├── __init__.py
 ├── models.py              # Strict dataclasses, Enums, 15 permitted pairs, and sort orders
 ├── identity.py            # IdentityResolver indexing user_identities.csv and user_audit_log.csv
-├── evidence_loader.py     # Multi-format ingestion (JSON, SQL, LOG, TXT, PDF) with trace correlation
+├── evidence_loader.py     # Multi-format ingestion (JSON, SQL, LOG, TXT, PDF, PNG) with trace correlation
 ├── policy_engine.py       # Deterministic policy rules driven by deletion_rules.csv
 ├── auditor.py             # DeletionAuditor orchestrating candidate discovery & as-of state
+├── model_layer.py         # ModelLayer: Intent Gate (LLM/fallback), VLM Extraction, & Telemetry
+├── pricing_config.json    # Pricing configuration for LLM/VLM cost estimation (unverified reference)
 ├── emitter.py             # OutputEmitter formatting RFC-compliant CSV and compact JSON
 ├── main.py                # Command-line entrypoint
+├── cache/                 # Persistent on-disk caches (intent_cache.json, images/*.json, telemetry.jsonl)
 ├── evaluation/
 │   ├── evaluate.py        # Accuracy metric benchmarking script
 │   ├── validate_output.py # Strict output schema and contract validator
 │   ├── evaluation_report.md
 │   └── usage_report.md
 └── tests/
-    └── test_audit.py      # 14 pytest unit and regression tests
+    ├── fixtures/          # Hand-reviewed micro-fixtures for regression testing
+    └── test_audit.py      # 19 pytest unit, regression, and fixture tests
 ```
 
 ### Key Modules:
 - **`IdentityResolver` (`identity.py`)**: Resolves current and historical identifiers across email changes, phone changes, and email hashes. Prevents cross-user leakage by anchoring on stable `user_id`.
-- **`EvidenceLoader` (`evidence_loader.py`)**: Ingests all 94 evidence files. Unpacks nested SQL tables, extracts text and references from PDF attachments, normalizes timestamps, and groups distributed log traces via `trace_id` and `requestId`.
+- **`EvidenceLoader` (`evidence_loader.py`)**: Ingests all 94 evidence files. Unpacks nested SQL tables, extracts text and references from PDF attachments, parses screenshot JSONs, normalizes timestamps, and groups distributed log traces via `trace_id` and `requestId`.
+- **`ModelLayer` (`model_layer.py`)**:
+  - **Intent Gate**: LLM-based classifier for request text returning strict JSON `{requests_deletion, language, evidence_quote}` with schema validation, retry, text-hash caching, and deterministic fallback. (Of 392 unique texts, 5 were Gemini-classified; 387 used the deterministic fallback after hitting the 20 req/day `429 RESOURCE_EXHAUSTED` limit. Disagreements default to conservative outcomes).
+  - **Image Evidence (VLM)**: Extracts visible fields (resources, types, emails, phones, names, states, timestamps) from PNG evidence screenshots without inference, cached on disk.
+  - **TelemetryTracker**: Tracks providers, models, tokens, latency, cache hits, and estimates costs using `pricing_config.json` (unverified reference rates).
 - **`PolicyEngine` (`policy_engine.py`)**: Applies the 15 policies from `deletion_rules.csv`. Enforces tombstone redaction (keeping stable user ID, removing PII), security audit retention, support conversation redaction vs attachment deletion, and active flow/restore blocking.
 - **`DeletionAuditor` (`auditor.py`)**:
   - Classifies non-deletion requests as `NOT_APPLICABLE` (`steps_json=[]`).
@@ -90,10 +98,12 @@ code/
 - **`INCOMPLETE`**: Every `FINDING` cites valid evidence; proposed `REMEDIATION` and future `VERIFICATION` steps strictly use `evidence_id=""`.
 - **Temporal Boundary**: Never cites evidence captured after the case's `audit_at`.
 - **Empirical Proof**: Never treats workflow statuses or `reported_result` alone as proof of absence.
+- **Deterministic Offline Guarantee**: Works seamlessly with zero API keys using disk caches and deterministic rule fallbacks.
 
 ---
 
 ## 4. Evaluation Reports
 Detailed reports are available under `code/evaluation/`:
-- **`evaluation_report.md`**: Measured case status accuracy (100.0% on samples), step/field accuracy, 3 custom test cases, failure analysis.
-- **`usage_report.md`**: Zero remote API calls, $0.00 cost, 4.88s runtime across 518 cases (106 requests/sec).
+- **`evaluation_report.md`**: Measured case status accuracy (100.0% on samples), step/field accuracy, 3 synthetic multilingual test cases (evaluated via rule fallback), hand-reviewed regression fixtures, failure analysis.
+- **`usage_report.md`**: Telemetry and cost report tracking model calls, unverified reference pricing, tokens, per-request averages, and cache hits.
+

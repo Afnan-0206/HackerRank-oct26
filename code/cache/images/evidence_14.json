@@ -1,0 +1,70 @@
+{
+  "system_id": "BridgeOps",
+  "resources": [
+    {
+      "resource_id": "data_flow_1121",
+      "record_type": "Connector",
+      "email": "jain.aditi@gmail.com",
+      "phone": null,
+      "name": null,
+      "status": "Healthy",
+      "timestamp": "07:59:42",
+      "details": {
+        "Destination": "customer_analytics_warehouse",
+        "Mode": "Continuous",
+        "Events/hour": "1,284",
+        "Owner": "Data Platform",
+        "Sync mode": "Continuous sync",
+        "Last response": "200 OK - 1.8 s",
+        "Activity": [
+          "07:59:42 124 events delivered",
+          "07:58:10 checkpoint committed",
+          "07:56:44 18 events retried",
+          "07:55:02 destination acknowledged batch"
+        ]
+      }
+    },
+    {
+      "resource_id": "data_flow_9846",
+      "record_type": "Connector",
+      "email": "lucia-torres@gmail.com",
+      "phone": null,
+      "name": null,
+      "status": null,
+      "timestamp": "07:59:36",
+      "details": {
+        "Destination": "customer_analytics_warehouse",
+        "Mode": "Continuous",
+        "Events/hour": "842"
+      }
+    },
+    {
+      "resource_id": "Order notifications",
+      "record_type": "Connector",
+      "email": null,
+      "phone": null,
+      "name": "order events",
+      "status": null,
+      "timestamp": "07:59:28",
+      "details": {
+        "Destination": "notification_service",
+        "Mode": "Continuous",
+        "Events/hour": "650"
+      }
+    },
+    {
+      "resource_id": "Delivery tracking",
+      "record_type": "Connector",
+      "email": null,
+      "phone": null,
+      "name": "shipment events",
+      "status": null,
+      "timestamp": "07:59:13",
+      "details": {
+        "Destination": "logistics_warehouse",
+        "Mode": "Continuous",
+        "Events/hour": "420"
+      }
+    }
+  ]
+}

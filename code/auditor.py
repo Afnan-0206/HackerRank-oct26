@@ -105,16 +105,42 @@ class DeletionAuditor:
             "continue using the service",
             "don't delete",
             "do not delete",
+            "unsubscribe me from marketing",
+            "stop the promotional emails",
+            "export my data",
+            "do i have data on file",
+            "what personal data",
+            "what personal information",
+            "download a copy",
+            "download my account information",
+            "portable format",
+            "qué información",
+            "descargar una copia",
+            "copie de mes données",
+            "nicht löschen",
+            "ne supprimez pas",
+            "削除しないで",
+            "non cancellate",
         ]
         return any(marker in txt for marker in non_del_markers)
 
-    def audit_case(self, req: DeletionRequest) -> Tuple[DeletionStatus, List[Step]]:
+    def audit_case(self, req: DeletionRequest, model_layer: Optional[Any] = None) -> Tuple[DeletionStatus, List[Step]]:
         """
         Audit a single deletion request. Returns (status, ordered_steps).
         """
-        # Step 1: Check if NOT_APPLICABLE
-        if self.is_non_deletion_request(req.request_text):
-            return DeletionStatus.NOT_APPLICABLE, []
+        # Step 1: Intent Gate (Model + Policy Rule with conservative disagreement resolution)
+        rule_requests_del = not self.is_non_deletion_request(req.request_text)
+        
+        if model_layer is not None:
+            model_res = model_layer.classify_intent(req.request_text)
+            model_requests_del = model_res.get("requests_deletion", True)
+            
+            # The model never overrides the policy engine, and disagreement defaults to the more conservative outcome
+            if not rule_requests_del or not model_requests_del:
+                return DeletionStatus.NOT_APPLICABLE, []
+        else:
+            if not rule_requests_del:
+                return DeletionStatus.NOT_APPLICABLE, []
 
         # Step 2: Resolve user identity
         user = self.resolver.resolve_by_email(req.email)
@@ -202,18 +228,38 @@ class DeletionAuditor:
                 resource_id=rid,
                 data_category=cat,
                 observed_state=obs_stat,
-                evidence_id=cited_ev
+                evidence_id=cited_ev,
+                evidence_details=latest_ev.raw_details
             )
 
             if f_step:
                 findings.append(f_step)
             if r_step:
                 remediations.append(r_step)
-            verifications.append(v_step)
+            if v_step:
+                verifications.append(v_step)
 
         # Step 5: Determine overall status
         if findings:
             status = DeletionStatus.INCOMPLETE
+
+            # INCOMPLETE-only retained-record rule:
+            # An incomplete case requires a post-remediation verification plan.
+            # Confirming that policy-mandated retained records (e.g. security audit logs, legal holds)
+            # still exist (VERIFY_RECORD_PRESENT) is required in the verification plan,
+            # with empty evidence_id.
+            existing_verif_res = {s.resource_id for s in verifications}
+            for k in u_keys:
+                for rec in self.loader.by_identifier.get(k, []):
+                    rid = rec.resource_id
+                    if rid and rid not in existing_verif_res:
+                        cat_u = rec.data_category.upper()
+                        if "audit_record" in rid or cat_u in ["SECURITY_AUDIT_LOG", "LEGAL_HOLD_RECORD"]:
+                            verifications.append(
+                                Step(0, StepPhase.VERIFICATION, rec.system_id, rid, Operation.VERIFY_RECORD_PRESENT, ResourceState.PRESENT, "")
+                            )
+                            existing_verif_res.add(rid)
+
             for r in remediations:
                 r.evidence_id = ""
             for v in verifications:

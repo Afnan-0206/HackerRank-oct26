@@ -8,8 +8,12 @@ import os
 import re
 import json
 import sqlite3
+import logging
 import pandas as pd
 from typing import Dict, List, Optional, Set, Tuple, Any
+
+logger = logging.getLogger(__name__)
+
 try:
     from .models import NormalizedEvidence, UserIdentity
 except (ImportError, ValueError):
@@ -97,16 +101,21 @@ class EvidenceLoader:
             captured_at = meta["captured_at"]
             ext = rel_path.split(".")[-1].lower()
             
-            if ext == "txt":
-                self._parse_txt(file_id, captured_at, full_path)
-            elif ext == "json":
-                self._parse_json(file_id, captured_at, full_path)
-            elif ext == "sql":
-                self._parse_sql(file_id, captured_at, full_path)
-            elif ext == "log":
-                self._parse_log(file_id, captured_at, full_path)
-            elif ext == "pdf":
-                self._parse_pdf(file_id, captured_at, full_path)
+            try:
+                if ext == "txt":
+                    self._parse_txt(file_id, captured_at, full_path)
+                elif ext == "json":
+                    self._parse_json(file_id, captured_at, full_path)
+                elif ext == "sql":
+                    self._parse_sql(file_id, captured_at, full_path)
+                elif ext == "log":
+                    self._parse_log(file_id, captured_at, full_path)
+                elif ext == "pdf":
+                    self._parse_pdf(file_id, captured_at, full_path)
+                elif ext == "png":
+                    self._parse_image(file_id, captured_at, full_path)
+            except Exception as e:
+                logger.warning(f"Failed to parse evidence file {file_id} ({rel_path}): {e}. Skipping file.")
 
     def _parse_txt(self, file_id: str, captured_at: str, path: str):
         # Format: timestamp | system_id | resource_id | category | status | identifier
@@ -626,4 +635,79 @@ class EvidenceLoader:
                 self._add_record(rec)
         except Exception:
             pass
+
+    def _parse_image(self, file_id: str, captured_at: str, path: str):
+        try:
+            try:
+                from .model_layer import ModelLayer
+            except (ImportError, ValueError):
+                from model_layer import ModelLayer
+
+            ml = ModelLayer()
+            data = ml.extract_image_evidence(path, file_id)
+            if not data or not isinstance(data, dict):
+                logger.warning(f"No image evidence extracted for {file_id} from {path}. Skipping image.")
+                return
+
+            resources = data.get("resources", [])
+            if not resources:
+                logger.warning(f"Image {file_id} ({path}) contains 0 resources. Skipping image.")
+                return
+
+            sys_hint = data.get("system_id", "admin_console")
+            for r in resources:
+                rid = r.get("resource_id")
+                if not rid:
+                    continue
+
+                rec_type = r.get("record_type", "")
+                cat = self._infer_category(f"{sys_hint}_{rec_type}", rid)
+                sys_id = self._normalize_system(f"{sys_hint}_{rec_type}", rid)
+
+                raw_stat = str(r.get("status", "PRESENT")).upper()
+                stat = "PRESENT"
+                if "NOT_FOUND" in raw_stat or "404" in raw_stat or "DELETED" in raw_stat or "ABSENT" in raw_stat:
+                    stat = "NOT_FOUND"
+                elif "ANONYMIZED" in raw_stat:
+                    stat = "ANONYMIZED"
+                elif "REDACTED" in raw_stat:
+                    stat = "REDACTED"
+                elif "DISABLED" in raw_stat or "STOPPED" in raw_stat:
+                    stat = "DISABLED"
+                elif "BLOCKED" in raw_stat:
+                    stat = "BLOCKED"
+                elif "ACTIVE" in raw_stat or "ENABLED" in raw_stat:
+                    stat = "ACTIVE"
+
+                identifiers = {}
+                if r.get("email"):
+                    identifiers["email"] = str(r["email"]).strip().lower()
+                if r.get("phone"):
+                    identifiers["phone"] = str(r["phone"]).strip()
+                if r.get("name"):
+                    identifiers["name"] = str(r["name"]).strip()
+                details = r.get("details")
+                if details and isinstance(details, dict):
+                    if details.get("user_id"):
+                        identifiers["user_id"] = str(details["user_id"]).strip().lower()
+                    if details.get("customer_reference"):
+                        identifiers["user_id"] = str(details["customer_reference"]).strip().lower()
+                    if details.get("email") and "email" not in identifiers:
+                        identifiers["email"] = str(details["email"]).strip().lower()
+                    if details.get("phone") and "phone" not in identifiers:
+                        identifiers["phone"] = str(details["phone"]).strip()
+
+                rec = NormalizedEvidence(
+                    file_id=file_id,
+                    captured_at=captured_at,
+                    system_id=sys_id,
+                    resource_id=rid,
+                    data_category=cat,
+                    observed_status=stat,
+                    identifiers=identifiers,
+                    raw_details={"source": "image", "image_resource": r}
+                )
+                self._add_record(rec)
+        except Exception as e:
+            logger.warning(f"Error parsing image {file_id} ({path}): {e}. Skipping image.")
 

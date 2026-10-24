@@ -1,0 +1,78 @@
+{
+  "system_id": "Northstar Shop Customer Reference Registry",
+  "resources": [
+    {
+      "resource_id": "user_17",
+      "record_type": "Customer key",
+      "email": null,
+      "phone": null,
+      "name": null,
+      "status": "Retained reference",
+      "timestamp": "10 Mar 2026 07:18 UTC",
+      "details": {
+        "Created": "11 Jan 2024 08:42 UTC",
+        "Owner team": "Account Platform",
+        "Region": "eu-west",
+        "Overview records": [
+          {
+            "System": "Orders",
+            "Record reference": "ORD-20263245",
+            "Relationship": "Linked to customer",
+            "Created (UTC)": "11 Jan 2024 08:45",
+            "Status": "Active"
+          },
+          {
+            "System": "Support",
+            "Record reference": "CS-3245",
+            "Relationship": "Linked to customer",
+            "Created (UTC)": "14 Feb 2024 12:16",
+            "Status": "Active"
+          },
+          {
+            "System": "Support",
+            "Record reference": "CS-3378",
+            "Relationship": "Linked to customer",
+            "Created (UTC)": "03 Jun 2024 09:27",
+            "Status": "Active"
+          },
+          {
+            "System": "Finance",
+            "Record reference": "FIN-7742",
+            "Relationship": "Linked to customer",
+            "Created (UTC)": "22 Aug 2024 15:03",
+            "Status": "Active"
+          }
+        ],
+        "History": [
+          {
+            "Date": "10 Mar 2026",
+            "Event": "Metadata reviewed"
+          },
+          {
+            "Date": "22 Aug 2024",
+            "Event": "Finance link added"
+          },
+          {
+            "Date": "03 Jun 2024",
+            "Event": "Support link added"
+          },
+          {
+            "Date": "14 Feb 2024",
+            "Event": "Support link added"
+          },
+          {
+            "Date": "11 Jan 2024",
+            "Event": "Reference created"
+          }
+        ],
+        "Activity": [
+          "Reference created Recorded",
+          "Order link added ORD-20263245",
+          "Support links added CS-3245, CS-3378",
+          "Finance link added FIN-7742",
+          "Metadata reviewed Recorded"
+        ]
+      }
+    }
+  ]
+}

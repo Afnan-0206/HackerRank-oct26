@@ -87,52 +87,60 @@ def validate_output(output_csv: str, requests_csv: str) -> Dict[str, Any]:
     total_steps = 0
     phase_counts = {"FINDING": 0, "REMEDIATION": 0, "VERIFICATION": 0}
     
+    violations: List[str] = []
+
     for idx, row in out_df.iterrows():
         cid = str(row["case_id"])
         status = str(row["deletion_status"])
         steps_raw = str(row["steps_json"])
         
         if status not in status_counts:
-            raise ValueError(f"Invalid status '{status}' in case {cid}")
+            violations.append(f"Invalid status '{status}' in case {cid}")
+            continue
         status_counts[status] += 1
         
         try:
             steps = json.loads(steps_raw)
         except Exception as e:
-            raise ValueError(f"Failed to parse steps_json for {cid}: {e}")
+            violations.append(f"Failed to parse steps_json for {cid}: {e}")
+            continue
             
         if not isinstance(steps, list):
-            raise ValueError(f"steps_json is not an array for {cid}")
+            violations.append(f"steps_json is not an array for {cid}")
+            continue
             
         # NOT_APPLICABLE rule
         if status == "NOT_APPLICABLE":
             if steps != []:
-                raise ValueError(f"NOT_APPLICABLE case {cid} must have steps_json=[], got {steps}")
+                violations.append(f"NOT_APPLICABLE case {cid} must have steps_json=[], got {steps}")
             continue
 
-        # COMPLETE rule: verification steps only, each with non-empty evidence_id
+        # COMPLETE invariant: needs at least one VERIFICATION step with non-empty evidence_id; all steps must be VERIFICATION with valid evidence_id
         if status == "COMPLETE":
+            has_valid_verification = any(s.get("phase") == "VERIFICATION" and s.get("evidence_id") for s in steps)
+            if not has_valid_verification:
+                violations.append(f"COMPLETE case {cid} needs at least one VERIFICATION step with a non-empty evidence_id, got {len(steps)} steps")
             for s in steps:
                 if s.get("phase") != "VERIFICATION":
-                    raise ValueError(f"COMPLETE case {cid} contains non-VERIFICATION step: {s}")
-                if not s.get("evidence_id"):
-                    raise ValueError(f"COMPLETE case {cid} step missing evidence_id: {s}")
+                    violations.append(f"COMPLETE case {cid} contains non-VERIFICATION step: {s}")
+                ev = s.get("evidence_id")
+                if not ev:
+                    violations.append(f"COMPLETE case {cid} step missing evidence_id: {s}")
 
-        # INCOMPLETE rule:
-        # findings cite valid evidence_id; proposed remediation and future verification have empty evidence_id
+        # INCOMPLETE invariant: needs at least one FINDING step; findings cite valid evidence_id; proposed remediation/future verification have empty evidence_id
         if status == "INCOMPLETE":
             has_finding = any(s.get("phase") == "FINDING" for s in steps)
             if not has_finding:
-                raise ValueError(f"INCOMPLETE case {cid} has no FINDING steps")
+                violations.append(f"INCOMPLETE case {cid} needs at least one FINDING step, got {len(steps)} steps")
             for s in steps:
                 p = s.get("phase")
                 ev = s.get("evidence_id")
                 if p == "FINDING":
                     if not ev:
-                        raise ValueError(f"INCOMPLETE case {cid} FINDING step has empty evidence_id: {s}")
+                        violations.append(f"INCOMPLETE case {cid} FINDING step has empty evidence_id: {s}")
                 elif p in ("REMEDIATION", "VERIFICATION"):
                     if ev != "":
-                        raise ValueError(f"INCOMPLETE case {cid} {p} step must have empty evidence_id='', got '{ev}'")
+                        violations.append(f"INCOMPLETE case {cid} {p} step must have empty evidence_id='', got '{ev}'")
 
         # Step numbering & sorting check
         prev_sort_tuple = (-1, -1, "", "")
@@ -140,7 +148,7 @@ def validate_output(output_csv: str, requests_csv: str) -> Dict[str, Any]:
             total_steps += 1
             # Step numbering consecutive from 1
             if s.get("step_no") != s_idx:
-                raise ValueError(f"Case {cid} step_no out of sequence: expected {s_idx}, got {s.get('step_no')}")
+                violations.append(f"Case {cid} step_no out of sequence: expected {s_idx}, got {s.get('step_no')}")
                 
             p = s.get("phase")
             op = s.get("operation")
@@ -152,9 +160,9 @@ def validate_output(output_csv: str, requests_csv: str) -> Dict[str, Any]:
                 op_enum = Operation(op)
                 st_enum = ResourceState(st)
                 if OPERATION_STATE_MAP.get(op_enum) != st_enum:
-                    raise ValueError(f"Case {cid} state mismatch for {op}: expected {OPERATION_STATE_MAP.get(op_enum)}, got {st}")
+                    violations.append(f"Case {cid} state mismatch for {op}: expected {OPERATION_STATE_MAP.get(op_enum)}, got {st}")
             except Exception as ex:
-                raise ValueError(f"Case {cid} invalid operation/state pair ({op}, {st}): {ex}")
+                violations.append(f"Case {cid} invalid operation/state pair ({op}, {st}): {ex}")
                 
             phase_counts[p] = phase_counts.get(p, 0) + 1
             
@@ -163,8 +171,14 @@ def validate_output(output_csv: str, requests_csv: str) -> Dict[str, Any]:
             curr_sort_tuple = (p_val, o_val, str(sys_id), str(res_id))
             
             if curr_sort_tuple < prev_sort_tuple:
-                raise ValueError(f"Case {cid} sorting violation: {curr_sort_tuple} < {prev_sort_tuple}")
+                violations.append(f"Case {cid} sorting violation: {curr_sort_tuple} < {prev_sort_tuple}")
             prev_sort_tuple = curr_sort_tuple
+
+    if violations:
+        print(f"\nVALIDATION FAILED WITH {len(violations)} VIOLATIONS:")
+        for v in violations:
+            print(f"  - {v}")
+        raise ValueError(f"Validation failed with {len(violations)} violations. First: {violations[0]}")
 
     report = {
         "status": "PASS",

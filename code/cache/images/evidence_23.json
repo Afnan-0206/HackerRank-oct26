@@ -1,0 +1,64 @@
+{
+  "system_id": "Northstar Shop",
+  "resources": [
+    {
+      "resource_id": "export_1261",
+      "record_type": "Data export",
+      "email": "marcus.lee@northstar.shop",
+      "phone": null,
+      "name": null,
+      "status": "Collecting",
+      "timestamp": "20 Jun 14:18 UTC",
+      "details": {
+        "Filename": "customer_export_1261.zip"
+      }
+    },
+    {
+      "resource_id": "export_1260",
+      "record_type": "Data export",
+      "email": "ingrid.dahl@outlook.com",
+      "phone": null,
+      "name": null,
+      "status": "Ready",
+      "timestamp": "18 Jun 2026 06:42 UTC",
+      "details": {
+        "Filename": "customer_export_1260.zip",
+        "Expires": "25 Jun 2026 06:42 UTC",
+        "Size": "18.4 MB",
+        "Checksum": "SHA-256 - 41ca09...",
+        "Download count": "0",
+        "Included": "Profile - Orders - Saved addresses",
+        "Activity": [
+          "06:46 Ready for download",
+          "06:45 Package created",
+          "06:43 Collecting customer records",
+          "06:42 Export requested"
+        ]
+      }
+    },
+    {
+      "resource_id": "export_1259",
+      "record_type": "Data export",
+      "email": "sara.kim@northstar.shop",
+      "phone": null,
+      "name": null,
+      "status": "Packaging",
+      "timestamp": "17 Jun 11:03 UTC",
+      "details": {
+        "Filename": "customer_export_1259.zip"
+      }
+    },
+    {
+      "resource_id": "export_1258",
+      "record_type": "Data export",
+      "email": "daniel.park@northstar.shop",
+      "phone": null,
+      "name": null,
+      "status": "Ready",
+      "timestamp": "16 Jun 09:27 UTC",
+      "details": {
+        "Filename": "customer_export_1258.zip"
+      }
+    }
+  ]
+}

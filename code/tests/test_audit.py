@@ -463,3 +463,182 @@ def test_support_record_actions_rule_5_and_6():
     assert r_idx.operation == Operation.DELETE_RECORD
     assert v_idx.operation == Operation.VERIFY_RECORD_ABSENT
 
+
+# 17. Test Rules 5 and 6 Conditions: Silence / Needs Review when condition not met
+def test_rules_5_and_6_unmet_conditions_emit_nothing_and_log_needs_review(caplog):
+    """
+    Verifies that:
+    1. SUPPORT_MESSAGE without shared context (e.g. private draft, has_shared_context=False)
+       emits nothing (None, None, None) and logs a 'needs review' marker.
+    2. SUPPORT_ATTACHMENT shared with others (e.g. shared_with_others=True)
+       emits nothing (None, None, None) and logs a 'needs review' marker.
+    """
+    import logging
+    engine = PolicyEngine()
+
+    with caplog.at_level(logging.WARNING):
+        # 1. message-without-shared-context
+        f_msg, r_msg, v_msg = engine.evaluate_resource(
+            system_id="support_platform",
+            resource_id="support_msg_private",
+            data_category="SUPPORT_MESSAGE",
+            observed_state="PRESENT",
+            evidence_id="evidence_test",
+            has_shared_context=False
+        )
+        assert f_msg is None
+        assert r_msg is None
+        assert v_msg is None
+        assert any("needs review" in rec.message.lower() and "support_message" in rec.message.lower() for rec in caplog.records)
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        # 2. attachment-shared-with-others
+        f_att, r_att, v_att = engine.evaluate_resource(
+            system_id="support_platform",
+            resource_id="support_att_shared",
+            data_category="SUPPORT_ATTACHMENT",
+            observed_state="PRESENT",
+            evidence_id="evidence_test",
+            shared_with_others=True
+        )
+        assert f_att is None
+        assert r_att is None
+        assert v_att is None
+        assert any("needs review" in rec.message.lower() and "support_attachment" in rec.message.lower() for rec in caplog.records)
+
+
+# 18. Test INCOMPLETE-Only Retained-Record Rule
+def test_incomplete_only_retained_record_rule():
+    """
+    Verifies that:
+    1. In an INCOMPLETE case (e.g. case_09, where remaining records exist), policy-mandated
+       retained records (e.g. audit_record_4902 in evidence_06 with captured_at > audit_at)
+       are included in the post-remediation verification plan with VERIFY_RECORD_PRESENT and empty evidence_id.
+    2. In a COMPLETE case (e.g. case_03, case_21), retained records MUST be verified by evidence
+       captured at or before audit_at with a non-empty evidence_id. Future-captured evidence is excluded.
+    """
+    auditor = DeletionAuditor("dataset")
+    
+    # case_09 is INCOMPLETE (audit_at=2026-09-16T09:00:00Z, evidence_06 captured_at=2026-09-18T11:55:24Z)
+    req_09 = DeletionRequest(
+        case_id="case_09",
+        email="k.appiah88@gmail.com",
+        requested_at="2026-08-31T09:00:00Z",
+        reported_status="COMPLETE",
+        reported_at="2026-09-03T09:00:00Z",
+        audit_at="2026-09-16T09:00:00Z",
+        request_text="I am asking you to delete my account and the personal information linked to it. Please verify that this was completed."
+    )
+    status_09, steps_09 = auditor.audit_case(req_09)
+    assert status_09 == DeletionStatus.INCOMPLETE
+    audit_steps_09 = [s for s in steps_09 if s.resource_id == "audit_record_4902"]
+    assert len(audit_steps_09) == 1
+    s_09 = audit_steps_09[0]
+    assert s_09.phase == StepPhase.VERIFICATION
+    assert s_09.operation == Operation.VERIFY_RECORD_PRESENT
+    assert s_09.state == ResourceState.PRESENT
+    assert s_09.evidence_id == ""  # Verification plan for incomplete case has empty evidence_id
+
+
+# 19. Real Fixture Datasets Audit Cases (including after-audit_at boundary)
+def test_fixtures_audit_cases_and_after_audit_at_boundary():
+    """
+    Tests end-to-end audit on real fixture dataset under code/tests/fixtures/.
+    Covers:
+    - Case 1: Incomplete audit case with lingering account and retained security audit log.
+    - Case 2: Complete audit case with compliant redacted account tombstone.
+    - Case 3: Case where evidence_fix_03b is captured AFTER audit_at (2026-09-02 > 2026-08-30).
+              Asserts that future evidence is ignored as of audit_at, resulting in COMPLETE,
+              and when audit_at is moved post-capture, evidence_fix_03b is ingested.
+    Asserts exact steps_json structure for each case.
+    """
+    fixtures_dir = os.path.join(code_dir, "tests", "fixtures")
+    auditor = DeletionAuditor(fixtures_dir)
+
+    # 1. Elena Rostova - Lingering account_101 -> INCOMPLETE
+    req1 = DeletionRequest(
+        case_id="case_fix_01",
+        email="elena.rostova@gmail.com",
+        requested_at="2026-03-20T10:00:00Z",
+        reported_status="COMPLETE",
+        reported_at="2026-03-24T12:00:00Z",
+        audit_at="2026-03-26T12:00:00Z",
+        request_text="Please permanently delete my account and all personal information."
+    )
+    status1, steps1 = auditor.audit_case(req1)
+    assert status1 == DeletionStatus.INCOMPLETE
+
+    expected_steps1 = [
+        {"step_no": 1, "phase": "FINDING", "system_id": "account_service", "resource_id": "account_101", "operation": "REPORT_REMAINING_RECORD", "state": "PRESENT", "evidence_id": "evidence_fix_01"},
+        {"step_no": 2, "phase": "REMEDIATION", "system_id": "account_service", "resource_id": "account_101", "operation": "DELETE_RECORD", "state": "ABSENT", "evidence_id": ""},
+        {"step_no": 3, "phase": "VERIFICATION", "system_id": "account_service", "resource_id": "account_101", "operation": "VERIFY_RECORD_ABSENT", "state": "ABSENT", "evidence_id": ""},
+        {"step_no": 4, "phase": "VERIFICATION", "system_id": "security_service", "resource_id": "audit_record_901", "operation": "VERIFY_RECORD_PRESENT", "state": "PRESENT", "evidence_id": ""}
+    ]
+    actual_steps1 = [s.to_dict() for s in steps1]
+    assert actual_steps1 == expected_steps1
+    assert json.dumps(actual_steps1) == json.dumps(expected_steps1)
+
+    # 2. Marcus Vance - Redacted tombstone_202 -> COMPLETE
+    req2 = DeletionRequest(
+        case_id="case_fix_02",
+        email="marcus.vance@fastmail.com",
+        requested_at="2026-08-10T10:00:00Z",
+        reported_status="COMPLETE",
+        reported_at="2026-08-16T11:00:00Z",
+        audit_at="2026-08-18T12:00:00Z",
+        request_text="I would like to delete all my data under GDPR."
+    )
+    status2, steps2 = auditor.audit_case(req2)
+    assert status2 == DeletionStatus.COMPLETE
+
+    expected_steps2 = [
+        {"step_no": 1, "phase": "VERIFICATION", "system_id": "identity_service", "resource_id": "tombstone_202", "operation": "VERIFY_RECORD_REDACTED", "state": "REDACTED", "evidence_id": "evidence_fix_02"}
+    ]
+    actual_steps2 = [s.to_dict() for s in steps2]
+    assert actual_steps2 == expected_steps2
+    assert json.dumps(actual_steps2) == json.dumps(expected_steps2)
+
+    # 3. Sarah Chen - evidence_fix_03b captured AFTER audit_at -> COMPLETE (ignoring future evidence)
+    req3 = DeletionRequest(
+        case_id="case_fix_03",
+        email="sarah.chen@outlook.com",
+        requested_at="2026-08-25T10:00:00Z",
+        reported_status="COMPLETE",
+        reported_at="2026-08-28T12:00:00Z",
+        audit_at="2026-08-30T12:00:00Z",  # Prior to evidence_fix_03b (2026-09-02T12:00:00Z)
+        request_text="Please erase my account and data immediately."
+    )
+    status3, steps3 = auditor.audit_case(req3)
+    assert status3 == DeletionStatus.COMPLETE
+
+    expected_steps3 = [
+        {"step_no": 1, "phase": "VERIFICATION", "system_id": "analytics_platform", "resource_id": "analytics_303", "operation": "VERIFY_RECORD_ANONYMIZED", "state": "ANONYMIZED", "evidence_id": "evidence_fix_03a"}
+    ]
+    actual_steps3 = [s.to_dict() for s in steps3]
+    assert actual_steps3 == expected_steps3
+    assert json.dumps(actual_steps3) == json.dumps(expected_steps3)
+
+    # Verify boundary behavior: when audit_at is moved after evidence_fix_03b capture
+    req3_post = DeletionRequest(
+        case_id="case_fix_03_post",
+        email="sarah.chen@outlook.com",
+        requested_at="2026-08-25T10:00:00Z",
+        reported_status="COMPLETE",
+        reported_at="2026-08-28T12:00:00Z",
+        audit_at="2026-09-05T12:00:00Z",  # After evidence_fix_03b (2026-09-02T12:00:00Z)
+        request_text="Please erase my account and data immediately."
+    )
+    status3_post, steps3_post = auditor.audit_case(req3_post)
+    assert status3_post == DeletionStatus.INCOMPLETE
+    expected_steps3_post = [
+        {"step_no": 1, "phase": "FINDING", "system_id": "account_service", "resource_id": "account_303", "operation": "REPORT_REMAINING_RECORD", "state": "PRESENT", "evidence_id": "evidence_fix_03b"},
+        {"step_no": 2, "phase": "REMEDIATION", "system_id": "account_service", "resource_id": "account_303", "operation": "DELETE_RECORD", "state": "ABSENT", "evidence_id": ""},
+        {"step_no": 3, "phase": "VERIFICATION", "system_id": "account_service", "resource_id": "account_303", "operation": "VERIFY_RECORD_ABSENT", "state": "ABSENT", "evidence_id": ""},
+        {"step_no": 4, "phase": "VERIFICATION", "system_id": "analytics_platform", "resource_id": "analytics_303", "operation": "VERIFY_RECORD_ANONYMIZED", "state": "ANONYMIZED", "evidence_id": ""}
+    ]
+    actual_steps3_post = [s.to_dict() for s in steps3_post]
+    assert actual_steps3_post == expected_steps3_post
+    assert json.dumps(actual_steps3_post) == json.dumps(expected_steps3_post)
+
+

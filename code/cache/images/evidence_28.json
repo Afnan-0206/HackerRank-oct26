@@ -1,0 +1,79 @@
+{
+  "system_id": "Helpline Console",
+  "resources": [
+    {
+      "resource_id": "CS-5034",
+      "record_type": "Ticket",
+      "email": "kagyeman8947@fastmail.com",
+      "phone": null,
+      "name": "Kofi Agyeman",
+      "status": "ACTIVE",
+      "timestamp": null,
+      "details": {
+        "SLA": "01:42",
+        "subject": "Where is my delivery?",
+        "support_id": "support_1034",
+        "ticket_priority": "Normal",
+        "assigned_to_agent": "Maya Chen",
+        "tags": [
+          "Delivery",
+          "Tracking",
+          "Order update"
+        ],
+        "order_details": {
+          "order_id": "ORD-20265034",
+          "product": "Running shoes",
+          "status": "In transit",
+          "carrier": "SwiftShip",
+          "tracking": "SWF-884103",
+          "expected_delivery": "26 May 2026",
+          "assigned_agent": "Maya Chen"
+        },
+        "conversation_history": [
+          {
+            "time": "09:12",
+            "sender": "Kofi Agyeman",
+            "message": "Could you let me know where my order is and when it is expected to arrive?"
+          },
+          {
+            "time": "09:13",
+            "sender": "Northstar Bot",
+            "message": "We received your message and are checking the order details."
+          },
+          {
+            "time": "09:28",
+            "sender": "Maya Chen",
+            "message": "The parcel reached the regional hub and is on track for delivery on 26 May."
+          },
+          {
+            "time": "09:35",
+            "sender": "Kofi Agyeman",
+            "message": "Thanks for the update."
+          }
+        ],
+        "activity_log": [
+          {
+            "date": "22 May",
+            "description": "Order confirmed"
+          },
+          {
+            "date": "23 May",
+            "description": "Dispatched"
+          },
+          {
+            "date": "24 May 07:46",
+            "description": "Reached regional hub"
+          },
+          {
+            "date": "24 May 08:15",
+            "description": "In transit"
+          },
+          {
+            "date": "26 May",
+            "description": "Delivery expected"
+          }
+        ]
+      }
+    }
+  ]
+}

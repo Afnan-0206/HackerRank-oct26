@@ -1,0 +1,26 @@
+{
+  "system_id": "Pulse Analytics",
+  "resources": [
+    {
+      "resource_id": "user_20 . analytics_7438",
+      "record_type": "Users",
+      "email": "darwish.omar@icloud.com",
+      "phone": null,
+      "name": "Omar Darwish",
+      "status": "PRESENT",
+      "timestamp": "13 Jul 2026 14:22 UTC",
+      "details": {
+        "Sessions": "12",
+        "Products viewed": "19",
+        "Completed orders": "2",
+        "Revenue": "USD 167.42",
+        "Mobile / Desktop": "67% / 33%",
+        "Acquisition": "Organic search",
+        "Market": "AE",
+        "Audience": "Returning shopper",
+        "Interest": "Coffee & dining",
+        "First seen": "21 Apr 2026 09:14 UTC"
+      }
+    }
+  ]
+}

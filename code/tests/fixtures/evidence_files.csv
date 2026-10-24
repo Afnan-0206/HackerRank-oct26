@@ -1,0 +1,5 @@
+file_id,file_path,origin,captured_at
+evidence_fix_01,evidence/records/fix_01.json,records_assurance_snapshot_bundle,2026-03-25T11:00:00Z
+evidence_fix_02,evidence/records/fix_02.json,records_assurance_snapshot_bundle,2026-08-17T09:00:00Z
+evidence_fix_03a,evidence/records/fix_03a.json,records_assurance_snapshot_bundle,2026-08-29T11:00:00Z
+evidence_fix_03b,evidence/records/fix_03b.json,records_assurance_snapshot_bundle,2026-09-02T12:00:00Z

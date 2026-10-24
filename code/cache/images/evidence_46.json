@@ -1,0 +1,138 @@
+{
+  "system_id": "Nimbus Object Storage",
+  "resources": [
+    {
+      "resource_id": "delivery_confirmation_19.pdf",
+      "record_type": "Object",
+      "email": null,
+      "phone": null,
+      "name": null,
+      "status": "PRESENT",
+      "timestamp": "12 Feb 2026 18:42 UTC",
+      "details": {
+        "Size": "684 KB",
+        "Storage class": "Standard",
+        "Version": "v3",
+        "Content type": "application/pdf",
+        "Encryption": "AES-256",
+        "Checksum": "e71b6d...",
+        "Uploader": "support-service",
+        "Activity": [
+          {
+            "version": "v3",
+            "timestamp": "12 Feb 18:42",
+            "description": "metadata update"
+          },
+          {
+            "version": "v2",
+            "timestamp": "12 Feb 18:39",
+            "description": "upload complete"
+          },
+          {
+            "version": "v1",
+            "timestamp": "12 Feb 18:38",
+            "description": "object created"
+          }
+        ]
+      }
+    },
+    {
+      "resource_id": "delivery_confirmation_20.pdf",
+      "record_type": "Object",
+      "email": null,
+      "phone": null,
+      "name": null,
+      "status": "PRESENT",
+      "timestamp": "11 Feb 2026 14:17 UTC",
+      "details": {
+        "Size": "712 KB",
+        "Storage class": "Standard",
+        "Version": "v1"
+      }
+    },
+    {
+      "resource_id": "return_label_4821.pdf",
+      "record_type": "Object",
+      "email": null,
+      "phone": null,
+      "name": null,
+      "status": "PRESENT",
+      "timestamp": "10 Feb 2026 09:33 UTC",
+      "details": {
+        "Size": "203 KB",
+        "Storage class": "Standard",
+        "Version": "v1"
+      }
+    },
+    {
+      "resource_id": "return_label_4876.pdf",
+      "record_type": "Object",
+      "email": null,
+      "phone": null,
+      "name": null,
+      "status": "PRESENT",
+      "timestamp": "11 Feb 2026 16:05 UTC",
+      "details": {
+        "Size": "198 KB",
+        "Storage class": "Standard",
+        "Version": "v2"
+      }
+    },
+    {
+      "resource_id": "invoice_NS-10493.pdf",
+      "record_type": "Object",
+      "email": null,
+      "phone": null,
+      "name": null,
+      "status": "PRESENT",
+      "timestamp": "10 Feb 2026 11:21 UTC",
+      "details": {
+        "Size": "318 KB",
+        "Storage class": "Standard",
+        "Version": "v1"
+      }
+    },
+    {
+      "resource_id": "parcel_damage_7713.jpg",
+      "record_type": "Object",
+      "email": null,
+      "phone": null,
+      "name": null,
+      "status": "PRESENT",
+      "timestamp": "12 Feb 2026 10:08 UTC",
+      "details": {
+        "Size": "2.4 MB",
+        "Storage class": "Standard",
+        "Version": "v1"
+      }
+    },
+    {
+      "resource_id": "customer_export_2026-02-10.zip",
+      "record_type": "Object",
+      "email": null,
+      "phone": null,
+      "name": null,
+      "status": "PRESENT",
+      "timestamp": "10 Feb 2026 23:14 UTC",
+      "details": {
+        "Size": "128 MB",
+        "Storage class": "Standard",
+        "Version": "v1"
+      }
+    },
+    {
+      "resource_id": "customer_export_2026-02-12.zip",
+      "record_type": "Object",
+      "email": null,
+      "phone": null,
+      "name": null,
+      "status": "PRESENT",
+      "timestamp": "12 Feb 2026 21:56 UTC",
+      "details": {
+        "Size": "131 MB",
+        "Storage class": "Standard",
+        "Version": "v1"
+      }
+    }
+  ]
+}

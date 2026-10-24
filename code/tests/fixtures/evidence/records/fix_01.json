@@ -1,0 +1,27 @@
+{
+  "snapshots": [
+    {
+      "data_store": "account_service",
+      "collection": "account_service",
+      "records": [
+        {
+          "resource_id": "account_101",
+          "user_id": "user_101",
+          "email": "elena.rostova@gmail.com",
+          "status": "PRESENT"
+        }
+      ]
+    },
+    {
+      "data_store": "security_service",
+      "collection": "security_service",
+      "records": [
+        {
+          "resource_id": "audit_record_901",
+          "user_id": "user_101",
+          "status": "PRESENT"
+        }
+      ]
+    }
+  ]
+}

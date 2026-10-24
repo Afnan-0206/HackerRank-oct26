@@ -1,0 +1,4 @@
+user_id,name,email,phone,email_hash,created_at
+user_101,Elena Rostova,elena.rostova@gmail.com,+1 555-0101,hash_elena_101,2025-01-01T00:00:00Z
+user_202,Marcus Vance,marcus.vance@fastmail.com,+1 555-0202,hash_marcus_202,2025-02-01T00:00:00Z
+user_303,Sarah Chen,sarah.chen@outlook.com,+1 555-0303,hash_sarah_303,2025-03-01T00:00:00Z

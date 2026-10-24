@@ -1,0 +1,96 @@
+{
+  "system_id": "Sentinel",
+  "resources": [
+    {
+      "resource_id": "audit_record_003",
+      "record_type": "Account closure recorded",
+      "email": null,
+      "phone": null,
+      "name": null,
+      "status": "Valid",
+      "timestamp": "25 Aug 04:03",
+      "details": {
+        "Category": "Account lifecycle",
+        "Subject": "user_03",
+        "Actor": "Automated workflow",
+        "event_type": "account_closure_recorded",
+        "subject_raw": "user_03",
+        "actor_raw": "automated account workflow",
+        "recorded_at": "2026-08-25T04:03:00Z",
+        "fingerprint": "8f0c...31ad",
+        "signature": "Valid",
+        "journal": "2026-Q3"
+      }
+    },
+    {
+      "resource_id": "audit_record_002",
+      "record_type": "Session revoked",
+      "email": null,
+      "phone": null,
+      "name": null,
+      "status": "Valid",
+      "timestamp": "25 Aug 03:21",
+      "details": {
+        "Category": "Session management",
+        "Subject": "user_03",
+        "Actor": "Security system"
+      }
+    },
+    {
+      "resource_id": "audit_record_001",
+      "record_type": "Recovery challenge completed",
+      "email": null,
+      "phone": null,
+      "name": null,
+      "status": "Valid",
+      "timestamp": "24 Aug 16:14",
+      "details": {
+        "Category": "Authentication",
+        "Subject": "user_03",
+        "Actor": "User (self)"
+      }
+    },
+    {
+      "resource_id": "audit_record_006",
+      "record_type": "Email change confirmed",
+      "email": null,
+      "phone": null,
+      "name": null,
+      "status": "Valid",
+      "timestamp": "22 Aug 11:27",
+      "details": {
+        "Category": "Profile update",
+        "Subject": "user_03",
+        "Actor": "User (self)"
+      }
+    },
+    {
+      "resource_id": "audit_record_005",
+      "record_type": "Login from new device",
+      "email": null,
+      "phone": null,
+      "name": null,
+      "status": "Valid",
+      "timestamp": "20 Aug 09:42",
+      "details": {
+        "Category": "Authentication",
+        "Subject": "user_03",
+        "Actor": "User (self)"
+      }
+    },
+    {
+      "resource_id": "audit_record_004",
+      "record_type": "Password changed",
+      "email": null,
+      "phone": null,
+      "name": null,
+      "status": "Valid",
+      "timestamp": "18 Aug 14:05",
+      "details": {
+        "Category": "Authentication",
+        "Subject": "user_03",
+        "Actor": "User (self)"
+      }
+    }
+  ]
+}

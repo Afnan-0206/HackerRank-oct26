@@ -1,0 +1,15 @@
+{
+  "snapshots": [
+    {
+      "data_store": "identity_service",
+      "collection": "identity_service",
+      "records": [
+        {
+          "resource_id": "tombstone_202",
+          "user_id": "user_202",
+          "status": "REDACTED"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "_metadata": {
+    "source_url": "https://ai.google.dev/pricing",
+    "retrieved_date": "2026-10-24",
+    "status": "unverified (reference estimate from published docs, not verified via live billing)"
+  },
+  "gemini-2.5-flash": {
+    "prompt_token_rate_per_million": 0.075,
+    "candidate_token_rate_per_million": 0.30
+  },
+  "gemini-1.5-flash": {
+    "prompt_token_rate_per_million": 0.075,
+    "candidate_token_rate_per_million": 0.30
+  },
+  "gpt-4o-mini": {
+    "prompt_token_rate_per_million": 0.15,
+    "candidate_token_rate_per_million": 0.60
+  },
+  "default": {
+    "prompt_token_rate_per_million": 0.075,
+    "candidate_token_rate_per_million": 0.30
+  }
+}

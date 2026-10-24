@@ -1,0 +1,16 @@
+{
+  "snapshots": [
+    {
+      "data_store": "account_service",
+      "collection": "account_service",
+      "records": [
+        {
+          "resource_id": "account_303",
+          "user_id": "user_303",
+          "email": "sarah.chen@outlook.com",
+          "status": "PRESENT"
+        }
+      ]
+    }
+  ]
+}

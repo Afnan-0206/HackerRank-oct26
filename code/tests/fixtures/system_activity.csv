@@ -1,0 +1,5 @@
+activity_id,event_time,event_type,source_system,target_system,resource_id,reported_result,details
+act_101,2026-03-24T12:00:00Z,DELETE_RECORD,deletion_worker,account_service,account_101,SUCCESS,Deletion worker deleted account_101 for user_101.
+act_102,2026-03-24T12:05:00Z,RETAIN_RECORD,security_service,archive_service,audit_record_901,SUCCESS,Archived security audit log audit_record_901 for user_101.
+act_201,2026-08-16T11:00:00Z,DELETE_RECORD,deletion_worker,account_service,account_202,SUCCESS,Deletion worker processed account_202 for user_202.
+act_301,2026-08-28T12:00:00Z,DELETE_RECORD,deletion_worker,account_service,account_303,SUCCESS,Deletion worker processed account_303 for user_303.

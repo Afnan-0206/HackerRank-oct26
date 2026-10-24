@@ -1,0 +1,15 @@
+{
+  "snapshots": [
+    {
+      "data_store": "analytics_platform",
+      "collection": "analytics_platform",
+      "records": [
+        {
+          "resource_id": "analytics_303",
+          "user_id": "user_303",
+          "status": "ANONYMIZED"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+case_id,email,requested_at,reported_status,reported_at,audit_at,request_text
+case_fix_01,elena.rostova@gmail.com,2026-03-20T10:00:00Z,COMPLETE,2026-03-24T12:00:00Z,2026-03-26T12:00:00Z,"Please permanently delete my account and all personal information."
+case_fix_02,marcus.vance@fastmail.com,2026-08-10T10:00:00Z,COMPLETE,2026-08-16T11:00:00Z,2026-08-18T12:00:00Z,"I would like to delete all my data under GDPR."
+case_fix_03,sarah.chen@outlook.com,2026-08-25T10:00:00Z,COMPLETE,2026-08-28T12:00:00Z,2026-08-30T12:00:00Z,"Please erase my account and data immediately."

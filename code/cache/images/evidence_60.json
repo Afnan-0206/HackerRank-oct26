@@ -1,0 +1,30 @@
+{
+  "system_id": "Audience Operations",
+  "resources": [
+    {
+      "resource_id": "marketing_001",
+      "record_type": "Customer Profile",
+      "email": "sj.park@naver.com",
+      "phone": "+82 10-5837-9451",
+      "name": "Soo-jin Park",
+      "status": "Live",
+      "timestamp": "15 Sep 2026 23:40 UTC",
+      "details": {
+        "Market": "South Korea",
+        "Language": "Korean",
+        "Email opt-in": "Yes",
+        "SMS opt-in": "No",
+        "Profile activity summary": "Updated moments ago - 4 records",
+        "Audience membership_Audience": "Returning customers \u2014 East Asia",
+        "Audience membership_Segments": "Repeat customer \u00b7 Home & lifestyle \u00b7 Mobile shopper",
+        "Audience membership_Preferred categories": "Desk accessories \u00b7 Drinkware",
+        "Audience membership_Last campaign": "Autumn offers",
+        "Audience membership_Open rate": "32.4%",
+        "Audience membership_Click rate": "6.8%",
+        "Activity_Autumn offers_open_rate": "32.4%",
+        "Activity_Home & Lifestyle Picks_open_rate": "28.7%",
+        "Activity_Profile refreshed from live data_status": "Recorded"
+      }
+    }
+  ]
+}

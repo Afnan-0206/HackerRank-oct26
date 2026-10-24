@@ -1,0 +1,32 @@
+{
+  "system_id": "Northstar Shop Search Console",
+  "resources": [
+    {
+      "resource_id": "search_428",
+      "record_type": "customer",
+      "email": "g.silva76@gmail.com",
+      "phone": null,
+      "name": "Gabriel Silva",
+      "status": null,
+      "timestamp": "2026-09-01T05:58:21Z",
+      "details": {
+        "customer_reference": "user_13",
+        "score": "9.84",
+        "_index": "customer_directory_v3"
+      }
+    },
+    {
+      "resource_id": "search_1874",
+      "record_type": "customer",
+      "email": "g.silva76.jr@gmail.com",
+      "phone": null,
+      "name": null,
+      "status": null,
+      "timestamp": "2026-09-01T05:55:03 UTC",
+      "details": {
+        "customer_reference": null,
+        "score": "4.12"
+      }
+    }
+  ]
+}
