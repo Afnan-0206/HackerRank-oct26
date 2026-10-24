@@ -413,3 +413,53 @@ def test_evidence_timestamp_boundary_filtering():
     assert len(ev02_valid) == 0
 
 
+# 16. Test Support Record Actions (Rule 05 Redact vs Rule 06 Delete)
+def test_support_record_actions_rule_5_and_6():
+    """
+    Verifies that:
+    1. SUPPORT_ATTACHMENT (Rule 6) triggers DELETE_RECORD / VERIFY_RECORD_ABSENT.
+    2. SUPPORT_MESSAGE (Rule 5) triggers REDACT_RECORD / VERIFY_RECORD_REDACTED.
+    3. Standalone contact index entries in support systems trigger DELETE_RECORD / VERIFY_RECORD_ABSENT.
+    """
+    engine = PolicyEngine()
+    
+    # 1. SUPPORT_ATTACHMENT (e.g. support_4218, support_001)
+    f_att, r_att, v_att = engine.evaluate_resource(
+        system_id="support_platform",
+        resource_id="support_4218",
+        data_category="SUPPORT_ATTACHMENT",
+        observed_state="FOUND",
+        evidence_id="evidence_03"
+    )
+    assert f_att.operation == Operation.REPORT_REMAINING_RECORD
+    assert r_att.operation == Operation.DELETE_RECORD
+    assert v_att.operation == Operation.VERIFY_RECORD_ABSENT
+    assert r_att.state == ResourceState.ABSENT
+    assert v_att.state == ResourceState.ABSENT
+    
+    # 2. SUPPORT_MESSAGE (e.g. support_864, support_4715)
+    f_msg, r_msg, v_msg = engine.evaluate_resource(
+        system_id="support_platform",
+        resource_id="support_864",
+        data_category="SUPPORT_MESSAGE",
+        observed_state="IDENTIFIABLE",
+        evidence_id="evidence_03"
+    )
+    assert f_msg.operation == Operation.REPORT_EXPOSED_PII
+    assert r_msg.operation == Operation.REDACT_RECORD
+    assert v_msg.operation == Operation.VERIFY_RECORD_REDACTED
+    assert r_msg.state == ResourceState.REDACTED
+    assert v_msg.state == ResourceState.REDACTED
+
+    # 3. Contact index in support system (e.g. support_002 from legacy_contact_index)
+    f_idx, r_idx, v_idx = engine.evaluate_resource(
+        system_id="support_platform",
+        resource_id="support_002",
+        data_category="SEARCH_INDEX_ENTRY",
+        observed_state="PRESENT",
+        evidence_id="evidence_61"
+    )
+    assert f_idx.operation == Operation.REPORT_REMAINING_RECORD
+    assert r_idx.operation == Operation.DELETE_RECORD
+    assert v_idx.operation == Operation.VERIFY_RECORD_ABSENT
+

@@ -481,6 +481,8 @@ class EvidenceLoader:
         m_cat = re.search(r'record_type["\s:=]+["\']?([a-zA-Z0-9_\-]+)', line)
         if m_cat:
             cat = m_cat.group(1)
+        elif "contact_index" in line_l or "legacy_contact" in line_l:
+            cat = "SEARCH_INDEX_ENTRY"
         else:
             cat = self._infer_category(sys_hint, res_id)
         sys_id = self._normalize_system(sys_hint, res_id)
@@ -532,10 +534,14 @@ class EvidenceLoader:
             return "ACCOUNT_TOMBSTONE"
         if "account" in ctx or "profile" in ctx:
             return "USER_PROFILE"
-        if "support" in ctx or "ticket" in ctx or "message" in ctx:
-            return "SUPPORT_MESSAGE"
         if "attachment" in ctx or "object_" in ctx:
             return "SUPPORT_ATTACHMENT"
+        if "search" in ctx:
+            return "SEARCH_INDEX_ENTRY"
+        if "analytics" in ctx or "telemetry" in ctx:
+            return "ANALYTICS_PROFILE"
+        if "support" in ctx or "ticket" in ctx or "message" in ctx:
+            return "SUPPORT_MESSAGE"
         if "data_flow" in ctx or "connector" in ctx:
             return "DATA_FLOW"
         if "backup" in ctx or "archive" in ctx:

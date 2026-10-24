@@ -91,6 +91,27 @@ class PolicyEngine:
                 v = Step(0, StepPhase.VERIFICATION, system_id, resource_id, Operation.VERIFY_RECORD_ANONYMIZED, ResourceState.ANONYMIZED, evidence_id)
                 return None, None, v
 
+        # Rule 06: SUPPORT_ATTACHMENT (Delete)
+        if cat == "SUPPORT_ATTACHMENT" or "attachment" in res_lower or "object_" in res_lower:
+            if stat in ["PRESENT", "FOUND", "ACTIVE", "IDENTIFIABLE"]:
+                f = Step(0, StepPhase.FINDING, system_id, resource_id, Operation.REPORT_REMAINING_RECORD, ResourceState.PRESENT, evidence_id)
+                r = Step(0, StepPhase.REMEDIATION, system_id, resource_id, Operation.DELETE_RECORD, ResourceState.ABSENT, "")
+                v = Step(0, StepPhase.VERIFICATION, system_id, resource_id, Operation.VERIFY_RECORD_ABSENT, ResourceState.ABSENT, evidence_id)
+                return f, r, v
+            else:
+                v = Step(0, StepPhase.VERIFICATION, system_id, resource_id, Operation.VERIFY_RECORD_ABSENT, ResourceState.ABSENT, evidence_id)
+                return None, None, v
+
+        # Contact index or secondary identifier entries in support systems (Delete)
+        if cat in ["SEARCH_INDEX_ENTRY", "SECONDARY_IDENTIFIER"]:
+            if stat in ["PRESENT", "FOUND", "ACTIVE", "IDENTIFIABLE"]:
+                f = Step(0, StepPhase.FINDING, system_id, resource_id, Operation.REPORT_REMAINING_RECORD, ResourceState.PRESENT, evidence_id)
+                r = Step(0, StepPhase.REMEDIATION, system_id, resource_id, Operation.DELETE_RECORD, ResourceState.ABSENT, "")
+                v = Step(0, StepPhase.VERIFICATION, system_id, resource_id, Operation.VERIFY_RECORD_ABSENT, ResourceState.ABSENT, evidence_id)
+                return f, r, v
+            else:
+                v = Step(0, StepPhase.VERIFICATION, system_id, resource_id, Operation.VERIFY_RECORD_ABSENT, ResourceState.ABSENT, evidence_id)
+                return None, None, v
 
         # Rule 05: SUPPORT_MESSAGE (Redact)
         if cat == "SUPPORT_MESSAGE" or "support" in res_lower:
