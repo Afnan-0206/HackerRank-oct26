@@ -426,116 +426,321 @@ class EvidenceLoader:
         except Exception:
             pass
 
+    def _clean_token(self, val: Optional[str]) -> Optional[str]:
+        if val is None:
+            return None
+        s = str(val).strip()
+        s = s.strip('"\'\\')
+        s = s.replace('\\"', '').replace('\\', '')
+        return s if s else None
+
+    def _tokenize_log_line(self, line: str) -> Optional[Dict[str, Any]]:
+        line = line.strip()
+        if not line:
+            return None
+
+        res: Dict[str, Any] = {
+            "timestamp": None,
+            "level": None,
+            "service": None,
+            "trace_id": None,
+            "event": None,
+            "resource_id": None,
+            "subject_keys": set(),
+            "result": None,
+            "http_status": None,
+            "rows": None,
+            "file": None,
+            "raw_attributes": {}
+        }
+
+        m_ts = re.match(r'^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)', line)
+        if m_ts:
+            res["timestamp"] = m_ts.group(1)
+            rest = line[m_ts.end():].strip()
+        else:
+            rest = line
+
+        # Case A: JSON structured log
+        if rest.startswith("{") and rest.endswith("}"):
+            try:
+                d = json.loads(rest)
+                res["level"] = self._clean_token(d.get("severity") or d.get("level"))
+                res["service"] = self._clean_token(d.get("service") or d.get("logger"))
+                res["trace_id"] = self._clean_token(d.get("trace_id") or d.get("requestId"))
+                res["event"] = self._clean_token(d.get("event"))
+                res["resource_id"] = self._clean_token(d.get("resource_id"))
+                res["result"] = self._clean_token(d.get("result"))
+                res["http_status"] = self._clean_token(str(d.get("http_status"))) if d.get("http_status") is not None else None
+                res["rows"] = int(d.get("rows")) if d.get("rows") is not None and str(d.get("rows")).isdigit() else None
+                res["file"] = self._clean_token(d.get("file"))
+
+                for k, v in d.items():
+                    if v is not None:
+                        res["raw_attributes"][k] = self._clean_token(str(v))
+                    if k in ("lookup_key", "subject_key", "subject_ref", "match_key", "matched_value",
+                            "subject_reference", "customer_email", "owner_key", "scan_key", "correlation_key"):
+                        c_val = self._clean_token(str(v))
+                        if c_val and c_val.lower() != "null":
+                            res["subject_keys"].add(c_val)
+                return res
+            except Exception:
+                pass
+
+        # Case B: Pipe-delimited
+        if rest.startswith("|") or " | " in rest:
+            parts = [p.strip() for p in rest.split("|") if p.strip()]
+            p_offset = 0
+            if not res["timestamp"] and len(parts) > 0 and re.match(r'^\d{4}-\d{2}-\d{2}', parts[0]):
+                res["timestamp"] = parts[0]
+                p_offset = 1
+
+            if len(parts) >= p_offset + 4:
+                res["level"] = self._clean_token(parts[p_offset].upper())
+                res["service"] = self._clean_token(parts[p_offset + 1])
+                res["trace_id"] = self._clean_token(parts[p_offset + 2])
+                res["event"] = self._clean_token(parts[p_offset + 3])
+                kv_text = " ".join(parts[p_offset + 4:])
+            else:
+                kv_text = " ".join(parts)
+        # Case C: Syslog RFC5424
+        elif rest.startswith("<") or re.match(r'^<\d+>\d\s+', rest):
+            m_syslog = re.match(r'^<(\d+)>(\d+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+-\s+-\s+(.*)$', rest)
+            if m_syslog:
+                res["service"] = self._clean_token(m_syslog.group(4))
+                res["trace_id"] = self._clean_token(m_syslog.group(5))
+                kv_text = m_syslog.group(6)
+            else:
+                kv_text = rest
+        # Case D: Bracket prefix
+        elif rest.startswith("["):
+            m_brack = re.match(r'^\[([A-Z]+)\]\s+\[([a-zA-Z0-9_\-]+)\]\s+\[([a-zA-Z0-9_\-]+)\]\s+([a-zA-Z0-9_\-]+)(?::\s*|\s+)(.*)$', rest)
+            if m_brack:
+                res["level"] = self._clean_token(m_brack.group(1).upper())
+                res["service"] = self._clean_token(m_brack.group(2))
+                res["trace_id"] = self._clean_token(m_brack.group(3))
+                res["event"] = self._clean_token(m_brack.group(4))
+                kv_text = m_brack.group(5)
+            else:
+                kv_text = rest
+        else:
+            kv_text = rest
+
+        # Unpack nested message="..." if present
+        m_msg = re.search(r'message="((?:\\.|[^"\\])*)"', kv_text)
+        if m_msg:
+            inner_msg = m_msg.group(1).replace(r'\"', '"')
+            kv_text = kv_text + " " + inner_msg
+
+        for m in re.finditer(r'([a-zA-Z0-9_\-]+)\s*[:=]\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s,>|]+))', kv_text):
+            k = m.group(1).lower()
+            v = m.group(2) if m.group(2) is not None else (m.group(3) if m.group(3) is not None else m.group(4))
+            if v is None:
+                continue
+            v_clean = self._clean_token(v)
+            if not v_clean:
+                continue
+            res["raw_attributes"][k] = v_clean
+
+            if k in ("level", "severity") and not res["level"]:
+                res["level"] = v_clean.upper()
+            elif k in ("service", "logger", "function") and not res["service"]:
+                res["service"] = v_clean
+            elif k in ("trace_id", "requestid") and not res["trace_id"]:
+                res["trace_id"] = v_clean
+            elif k == "event" and not res["event"]:
+                res["event"] = v_clean
+            elif k == "resource_id" and not res["resource_id"]:
+                res["resource_id"] = v_clean
+            elif k == "result" and not res["result"]:
+                res["result"] = v_clean
+            elif k == "http_status" and not res["http_status"]:
+                res["http_status"] = v_clean
+            elif k == "rows" and res["rows"] is None:
+                if v_clean.isdigit():
+                    res["rows"] = int(v_clean)
+            elif k == "file" and not res["file"]:
+                res["file"] = v_clean
+
+            if k in ("lookup_key", "subject_key", "subject_ref", "match_key", "matched_value",
+                    "subject_reference", "customer_email", "owner_key", "scan_key", "correlation_key"):
+                if v_clean.lower() != "null":
+                    res["subject_keys"].add(v_clean)
+
+        if not res["event"] and "event" in res["raw_attributes"]:
+            res["event"] = res["raw_attributes"]["event"]
+
+        return res
+
     def _parse_log(self, file_id: str, captured_at: str, path: str):
         """Parse structured and unstructured service logs with trace correlation."""
-        traces = {}
+        skip_events = {
+            "profile_lookup_started", "index_query_started", "audit_record_query_started",
+            "audit_record_read_started", "analytics_profile_scan_started", "analytics_profile_read_started",
+            "message_scan_started", "attachment_scan_started", "connector_config_read_started",
+            "restore_policy_check_started", "restore_policy_read_started", "export_started",
+            "export_metadata_read_started", "export_download_check_started", "connection_acquired",
+            "cache_lookup", "dependency_retry", "dependency_recovered", "cache_refresh",
+            "telemetry_flushed", "batch_started", "timer_tick", "disk_latency", "consumer_lag",
+            "pool_sample", "checkpoint_saved", "lease_extended", "lease_renewed", "slow_call_rate",
+            "certificate_checked", "connection_pool_pressure", "properties_reloaded",
+            "delivery_abandoned", "contact_query_started", "retained_order_query_started",
+            "support_ticket_read_started"
+        }
+
+        traces: Dict[str, Dict[str, Any]] = {}
+        untraced: List[Dict[str, Any]] = []
+
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             for line in f:
-                line = line.strip()
-                if not line:
+                t = self._tokenize_log_line(line)
+                if not t:
                     continue
-                trace_id = None
-                m_trace = re.search(r'trace_id["\s:=]+([a-zA-Z0-9_\-]+)', line)
-                if m_trace:
-                    trace_id = m_trace.group(1)
+                tr = t["trace_id"]
+                if tr:
+                    traces.setdefault(tr, {"keys": set(), "records": []})
+                    traces[tr]["keys"].update(t["subject_keys"])
+                    traces[tr]["records"].append(t)
                 else:
-                    m_req = re.search(r'requestId["\s:=]+([a-zA-Z0-9_\-]+)', line)
-                    if m_req:
-                        trace_id = m_req.group(1)
+                    untraced.append(t)
 
-                # Extract line timestamp if available
-                m_time = re.match(r'^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)', line)
-                log_time = m_time.group(1) if m_time else captured_at
+        def emit_log_record(t: Dict[str, Any], keys: Set[str]):
+            ev = t["event"]
+            res_id = t["resource_id"]
+            lvl = t["level"] or "INFO"
+            attrs = t["raw_attributes"]
 
-                # Extract service
-                m_svc = re.search(r'(?:service|logger|function)["\s:=]+["\']?([a-zA-Z0-9_]+)', line)
-                svc = m_svc.group(1) if m_svc else ""
+            # Never skip WARN or ERROR carrying resource_id or matched_value
+            is_warn_err = lvl in ("WARN", "WARNING", "ERROR")
+            if not res_id:
+                return
+            if ev in skip_events and not is_warn_err:
+                return
 
-                # Extract keys
-                keys = set()
-                for m_k in re.finditer(r'(?:lookup_key|subject_key|subject_reference|subject_ref|correlation_key|match_key|owner_key|customer_reference|lookup_value|customer_email)["\s:=]+["\']?([^"\'\s,>]+)', line):
-                    val = m_k.group(1).strip()
-                    if val and val.lower() != 'null':
-                        keys.add(val)
+            m_rid = re.match(r'^[a-z_]+_\d+$', res_id)
+            if not m_rid:
+                return
 
-                # Extract resource_id
-                m_res = re.search(r'resource_id["\s:=]+["\']?([a-zA-Z0-9_\-]+)', line)
-                res_id = m_res.group(1) if m_res else ""
+            svc = t["service"] or ""
+            # Category mapping per deletion_rules.csv
+            if ev == "attachment_pii_scan":
+                cat = "SUPPORT_ATTACHMENT"
+            elif ev in ("message_pii_scan", "message_read"):
+                cat = "SUPPORT_MESSAGE"
+            elif ev in ("analytics_identity_scan", "analytics_profile_read", "analytics_profile_read_completed"):
+                cat = "ANALYTICS_PROFILE"
+            elif ev in ("connector_heartbeat", "connector_config_loaded"):
+                cat = "DATA_FLOW"
+            elif ev in ("restore_candidate_evaluated", "restore_authorization_completed", "restore_policy_read_completed"):
+                cat = "BACKUP_ARCHIVE"
+            elif ev == "audit_record_read_completed":
+                cat = "SECURITY_AUDIT_LOG"
+            elif ev == "profile_lookup_completed":
+                cat = "USER_PROFILE"
+            elif ev in ("index_query_completed", "contact_query_completed", "contact_lookup_completed"):
+                cat = "SEARCH_INDEX_ENTRY"
+            elif ev == "deletion_marker_check":
+                cat = "ACCOUNT_TOMBSTONE"
+            elif ev in ("export_download_check_completed", "export_metadata_read_completed"):
+                cat = "USER_EXPORT"
+            else:
+                cat = self._infer_category(svc, res_id)
 
-                if trace_id:
-                    traces.setdefault(trace_id, {"keys": set(), "events": []})
-                    traces[trace_id]["keys"].update(keys)
-                    traces[trace_id]["events"].append((log_time, svc, res_id, line))
-                elif keys or res_id:
-                    # Single un-traced line
-                    self._process_log_event(file_id, log_time, svc, res_id, keys, line)
+            sys_id = self._normalize_system(svc, res_id)
 
-        # Now process grouped traces
-        for trace_id, tdata in traces.items():
-            all_keys = tdata["keys"]
-            for log_time, svc, res_id, raw_line in tdata["events"]:
-                if res_id:
-                    if "_started" in raw_line and ("lookup_started" in raw_line or "query_started" in raw_line):
-                        continue
-                    self._process_log_event(file_id, log_time, svc, res_id, all_keys, raw_line)
+            # Observed status
+            stat = "PRESENT"
+            if ev == "message_pii_scan":
+                if is_warn_err or attrs.get("matched_value"):
+                    stat = "PRESENT"
+                else:
+                    stat = "REDACTED"
+            elif ev == "attachment_pii_scan":
+                if is_warn_err or attrs.get("matched_value"):
+                    stat = "PRESENT"
+                else:
+                    stat = "NOT_FOUND"
+            elif ev == "analytics_identity_scan":
+                direct_id = attrs.get("direct_identifiers")
+                if direct_id is not None and str(direct_id) == "0":
+                    stat = "ANONYMIZED"
+                elif is_warn_err or (direct_id is not None and str(direct_id) != "0") or attrs.get("matched_value"):
+                    stat = "PRESENT"
+                else:
+                    stat = "ANONYMIZED"
+            elif ev == "connector_heartbeat":
+                en = attrs.get("enabled", "").lower()
+                if en == "true" or is_warn_err:
+                    stat = "ACTIVE"
+                else:
+                    stat = "DISABLED"
+            elif ev == "restore_candidate_evaluated":
+                del_block = attrs.get("deletion_block", "").lower()
+                elig = attrs.get("eligible", "").lower()
+                if del_block == "false" and elig == "true":
+                    stat = "ACTIVE"
+                else:
+                    stat = "BLOCKED"
+            elif ev in ("index_query_completed", "contact_query_completed", "contact_lookup_completed"):
+                res_val = attrs.get("result", "").lower()
+                rows_val = attrs.get("rows")
+                is_hit = (res_val == "hit") or (rows_val is not None and str(rows_val).isdigit() and int(rows_val) > 0)
+                if is_hit:
+                    stat = "PRESENT"
+                else:
+                    stat = "NOT_FOUND"
+            elif ev == "profile_lookup_completed":
+                h_stat = str(attrs.get("http_status", ""))
+                rows_val = attrs.get("rows")
+                is_miss = (h_stat == "404") or (rows_val is not None and str(rows_val).isdigit() and int(rows_val) == 0) or attrs.get("result") == "not_found"
+                if is_miss:
+                    stat = "NOT_FOUND"
+                else:
+                    stat = "PRESENT"
+            elif ev == "audit_record_read_completed":
+                stat = "PRESENT"
+            elif ev == "deletion_marker_check":
+                stat = "REDACTED"
+            elif ev == "message_read":
+                if attrs.get("message_text") == "[REDACTED]":
+                    stat = "REDACTED"
+                else:
+                    stat = "PRESENT"
 
-    def _process_log_event(self, file_id: str, log_time: str, svc: str, res_id: str, keys: Set[str], line: str):
-        if not res_id:
-            return
-            
-        line_l = line.lower()
-        m_sys = re.search(r'system["\s:=]+["\']?([a-zA-Z0-9_\-]+)', line)
-        sys_hint = m_sys.group(1) if m_sys else svc
-        
-        m_cat = re.search(r'record_type["\s:=]+["\']?([a-zA-Z0-9_\-]+)', line)
-        if m_cat:
-            cat = m_cat.group(1)
-        elif "contact_index" in line_l or "legacy_contact" in line_l:
-            cat = "SEARCH_INDEX_ENTRY"
-        else:
-            cat = self._infer_category(sys_hint, res_id)
-        sys_id = self._normalize_system(sys_hint, res_id)
-        
-        line_l = line.lower()
-        stat = "PRESENT"
-        if "rows=\"0\"" in line_l or "rows=0" in line_l or "http_status=\"404\"" in line_l or "http_status=404" in line_l or "result=\"miss\"" in line_l or "result=\"not_found\"" in line_l or "result=not_found" in line_l:
-            stat = "NOT_FOUND"
-        elif "result=\"active\"" in line_l or "result=active" in line_l:
-            stat = "ACTIVE"
-        elif "result=\"disabled\"" in line_l or "result=disabled" in line_l or "status=\"stopped\"" in line_l or "enabled=\"false\"" in line_l or "enabled=false" in line_l:
-            stat = "DISABLED"
-        elif "result=\"blocked\"" in line_l or "result=blocked" in line_l or "deletion_block=\"true\"" in line_l or "restore_allowed=\"false\"" in line_l or "restore_allowed=false" in line_l:
-            stat = "BLOCKED"
-        elif "result=\"anonymized\"" in line_l or "result=anonymized" in line_l or "direct_identifiers=\"0\"" in line_l or "anonymized" in line_l:
-            stat = "ANONYMIZED"
-        elif "result=\"redacted\"" in line_l or "result=redacted" in line_l or "message_text=\"[redacted]\"" in line_l or "redacted" in line_l:
-            stat = "REDACTED"
-        elif "deletion_block=\"false\"" in line_l and "eligible=\"true\"" in line_l:
-            stat = "ACTIVE" # restore risk active
+            # Build identifiers
+            identifiers = {}
+            for k in keys:
+                k_clean = self._clean_token(k)
+                if not k_clean:
+                    continue
+                if len(k_clean) == 64 and re.match(r'^[a-fA-F0-9]{64}$', k_clean):
+                    identifiers["email_hash"] = k_clean.lower()
+                elif k_clean.startswith("+") or (len(k_clean) >= 7 and re.match(r'^\+?[\d\s\-()]{7,}$', k_clean)):
+                    identifiers["phone"] = k_clean
+                elif "@" in k_clean:
+                    identifiers["email"] = k_clean.lower()
+                elif k_clean.lower().startswith("user_"):
+                    identifiers["user_id"] = k_clean.lower()
 
-        identifiers = {}
-        for k in keys:
-            k_str = str(k).strip()
-            if len(k_str) == 64 and re.match(r'^[a-fA-F0-9]{64}$', k_str):
-                identifiers["email_hash"] = k_str.lower()
-            elif k_str.startswith('+') or (len(k_str) >= 7 and re.match(r'^\+?[\d\s\-()]{7,}$', k_str)):
-                identifiers["phone"] = k_str
-            elif "@" in k_str:
-                identifiers["email"] = k_str.lower()
-            elif k_str.lower().startswith("user_"):
-                identifiers["user_id"] = k_str.lower()
+            rec = NormalizedEvidence(
+                file_id=file_id,
+                captured_at=captured_at,
+                system_id=sys_id,
+                resource_id=res_id,
+                data_category=cat,
+                observed_status=stat,
+                identifiers=identifiers,
+                raw_details=attrs
+            )
+            self._add_record(rec)
 
-        rec = NormalizedEvidence(
-            file_id=file_id,
-            captured_at=log_time,
-            system_id=sys_id,
-            resource_id=res_id,
-            data_category=cat,
-            observed_status=stat,
-            identifiers=identifiers,
-            raw_details={"line": line}
-        )
-        self._add_record(rec)
+        for tr, tdata in traces.items():
+            all_k = tdata["keys"]
+            for t in tdata["records"]:
+                emit_log_record(t, all_k)
+
+        for t in untraced:
+            emit_log_record(t, t["subject_keys"])
 
     def _infer_category(self, context: str, resource_id: str) -> str:
         ctx = (context + "_" + resource_id).lower()
@@ -604,10 +809,6 @@ class EvidenceLoader:
             emails = set(re.findall(r'([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', text))
             users = set(re.findall(r'\b(user_\d+)\b', text, re.IGNORECASE))
             phones = set(re.findall(r'(\+\d[\d\s\-()]{7,}\d)', text))
-
-            # Special case for support attachment: delivery_correction_attachment.pdf
-            if "delivery_correction" in path or "attachment" in path:
-                res_matches.add("support_001")
 
             for rid in res_matches:
                 cat = self._infer_category(path, rid)
