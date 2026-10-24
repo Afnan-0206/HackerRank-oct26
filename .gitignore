@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+code.zip
+output.csv
+scratch/
