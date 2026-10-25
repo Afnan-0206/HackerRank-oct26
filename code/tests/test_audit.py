@@ -760,4 +760,67 @@ def test_intent_gate_positive_non_deletion_and_multilingual_deletion():
     assert res_generic["requests_deletion"] is True, "Generic text without non-deletion signal must default to requests_deletion=True"
 
 
+# 22. Test Policy Engine: Rule 10 MARKETING_PROFILE Always Delete
+def test_policy_engine_marketing_profile_rule_10():
+    engine = PolicyEngine()
+    
+    # 22a. Direct category MARKETING_PROFILE
+    f, r, v = engine.evaluate_resource(
+        system_id="analytics_platform",
+        resource_id="marketing_1001",
+        data_category="MARKETING_PROFILE",
+        observed_state="PRESENT",
+        evidence_id="evidence_01"
+    )
+    assert f is not None
+    assert f.operation == Operation.REPORT_REMAINING_RECORD
+    assert f.state == ResourceState.PRESENT
+    assert r.operation == Operation.DELETE_RECORD
+    assert r.state == ResourceState.ABSENT
+    assert v.operation == Operation.VERIFY_RECORD_ABSENT
+    assert v.state == ResourceState.ABSENT
+
+    # 22b. Evidence with email_opt_in=true
+    f2, r2, v2 = engine.evaluate_resource(
+        system_id="analytics_platform",
+        resource_id="analytics_9914",
+        data_category="ANALYTICS_PROFILE",
+        observed_state="PRESENT",
+        evidence_id="evidence_01",
+        evidence_details={"email_opt_in": "true", "event": "contact_lookup_completed"}
+    )
+    assert f2 is not None
+    assert f2.operation == Operation.REPORT_REMAINING_RECORD
+    assert f2.state == ResourceState.PRESENT
+    assert r2.operation == Operation.DELETE_RECORD
+    assert r2.state == ResourceState.ABSENT
+    assert v2.operation == Operation.VERIFY_RECORD_ABSENT
+    assert v2.state == ResourceState.ABSENT
+
+
+# 23. Test Empirical Absence Snapshot Verification in COMPLETE Cases
+def test_complete_absence_evidence_upgrade():
+    auditor = DeletionAuditor("dataset")
+    req = DeletionRequest(
+        case_id="case_01",
+        email="amina.elmasri@gmail.com",
+        requested_at="2026-08-18T09:14:00Z",
+        reported_status="COMPLETE",
+        reported_at="2026-08-20T16:42:00Z",
+        audit_at="2026-09-03T11:30:00Z",
+        request_text="Hi, I haven’t used this account in years and would like it closed. Please remove the profile and the personal details attached to it."
+    )
+    status, steps = auditor.audit_case(req)
+    assert status == DeletionStatus.COMPLETE
+    assert len(steps) == 1
+    step = steps[0]
+    assert step.operation == Operation.VERIFY_RECORD_ABSENT
+    assert step.state == ResourceState.ABSENT
+    assert step.system_id == "account_service"
+    assert step.resource_id == "account_001"
+    # Must cite genuine empirical database snapshot (evidence_54) rather than operational worker log (activity_xxxx)
+    assert step.evidence_id == "evidence_54"
+
+
+
 

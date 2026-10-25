@@ -51,6 +51,21 @@ class PolicyEngine:
         stat = observed_state.upper()
         res_lower = resource_id.lower()
 
+        # Rule 10: MARKETING_PROFILE
+        # If explicitly marked as MARKETING_PROFILE or evidence indicates email_opt_in
+        is_marketing = (cat == "MARKETING_PROFILE") or (
+            evidence_details and evidence_details.get("email_opt_in") in (True, "true", "True", 1, "1")
+        )
+        if is_marketing:
+            if stat in ["PRESENT", "FOUND", "ACTIVE"]:
+                f = Step(0, StepPhase.FINDING, system_id, resource_id, Operation.REPORT_REMAINING_RECORD, ResourceState.PRESENT, evidence_id)
+                r = Step(0, StepPhase.REMEDIATION, system_id, resource_id, Operation.DELETE_RECORD, ResourceState.ABSENT, "")
+                v = Step(0, StepPhase.VERIFICATION, system_id, resource_id, Operation.VERIFY_RECORD_ABSENT, ResourceState.ABSENT, evidence_id)
+                return f, r, v
+            else:
+                v = Step(0, StepPhase.VERIFICATION, system_id, resource_id, Operation.VERIFY_RECORD_ABSENT, ResourceState.ABSENT, evidence_id)
+                return None, None, v
+
         # Rule 15: ACCOUNT_TOMBSTONE
         if cat == "ACCOUNT_TOMBSTONE" or "tombstone" in res_lower:
             if stat in ["PRESENT", "IDENTIFIABLE", "ACTIVE"]:

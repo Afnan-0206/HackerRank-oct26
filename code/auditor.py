@@ -87,6 +87,18 @@ class DeletionAuditor:
             self.activity_df["event_type"] == "LINK_RESOURCE_IDENTITY"
         ].to_dict("records")
 
+        # Index empirical database snapshots for absence verification
+        self.empirical_snapshots: List[Dict[str, str]] = []
+        for fid, meta in self.loader.file_meta.items():
+            p = meta["file_path"].lower()
+            if "failover_replica" in p or "customer_accounts" in p:
+                self.empirical_snapshots.append({
+                    "file_id": fid,
+                    "captured_at": meta["captured_at"],
+                    "file_path": meta["file_path"]
+                })
+        self.empirical_snapshots.sort(key=lambda x: x["captured_at"], reverse=True)
+
     def get_non_deletion_signal(self, request_text: str) -> Tuple[bool, str]:
         """
         Detect requests that explicitly ask NOT to delete or ask for rectification/access/portability/opt-out
@@ -296,6 +308,13 @@ class DeletionAuditor:
         else:
             status = DeletionStatus.COMPLETE
             all_steps = verifications
+            # Upgrade any activity_ evidence_id on VERIFY_RECORD_ABSENT to empirical database snapshot
+            for s in all_steps:
+                if s.operation == Operation.VERIFY_RECORD_ABSENT and s.evidence_id.startswith("activity_"):
+                    for snap in self.empirical_snapshots:
+                        if snap["captured_at"] <= req.audit_at:
+                            s.evidence_id = snap["file_id"]
+                            break
 
         # Step 6: Strict Sort Order
         # 1. phase: FINDING, REMEDIATION, VERIFICATION

@@ -1830,3 +1830,18 @@ repo_root=c:\Users\hp\Desktop\Projects\HackerRank\hackerrank-orchestrate-october
 worktree=main
 parent_agent=none
 
+
+### Optimization Pass: Root Cause 8 (Marketing Rule 10) & Root Cause 9 (Empirical Absence Snapshot Verification)
+Timestamp: 2026-10-25T11:53:00+05:30
+Model: Gemini 3.8 Flash (High)
+Actions:
+- Verified and benchmarked baseline across 32 sample cases (100% status acc, 46.9% exact step match, 53.1% exact seq match, 92.9% F1).
+- Implemented Rule 10 MARKETING_PROFILE detection in code/policy_engine.py for email_opt_in=true and marketing cohorts.
+- Implemented empirical database snapshot prioritization in code/auditor.py for VERIFY_RECORD_ABSENT on database records in COMPLETE cases.
+- Validated improvement: Combined exact step match jumped to 56.2% (18/32, +9.3% absolute gain), Holdout exact step match jumped to 50.0% (4/8, +12.5% absolute gain), Step Precision reached 100.0% (173/173, zero false positives), Aligned Evidence ID accuracy reached 100.0% (173/173).
+- Added regression tests test_policy_engine_marketing_profile_rule_10 and test_complete_absence_evidence_upgrade to code/tests/test_audit.py (23/23 tests passing).
+- Regenerated full competition output.csv across all 518 cases (141 COMPLETE, 367 INCOMPLETE, 10 NOT_APPLICABLE).
+- Validated output.csv with independent validator code/evaluation/validate_output.py (ALL VALIDATION CHECKS PASSED, 0 violations).
+- Created code/evaluation/interview_prep.md answering 15 AI judge interview questions + real architecture diagram.
+- Rebuilt and verified code.zip containing root README.md, code/ tree, evaluation reports, zero forbidden files.
+- Deliverables verified: code.zip, output.csv, log.txt.
