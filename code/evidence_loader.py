@@ -79,14 +79,56 @@ class EvidenceLoader:
             m_email = re.search(r'([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', dtls)
             if m_email:
                 identifiers["email"] = m_email.group(1).lower()
+
+            data_cat = "SYSTEM_ACTIVITY"
+            obs_stat = res_val
+            if event_type == "LINK_RESOURCE_IDENTITY":
+                # Check if a screenshot image exists in file_meta within 15 minutes
+                has_image = False
+                e_dt = pd.to_datetime(time_str)
+                for f_meta in self.file_meta.values():
+                    if "evidence/images/" in f_meta.get("file_path", ""):
+                        c_dt = pd.to_datetime(f_meta.get("captured_at", ""))
+                        if 0 <= (e_dt - c_dt).total_seconds() <= 900:
+                            has_image = True
+                            break
+                if has_image:
+                    continue  # Image parser will create the authoritative screenshot record
+
+                res_lower = res.lower()
+                if "export" in res_lower or tgt == "export_service":
+                    data_cat = "USER_EXPORT"
+                elif "account" in res_lower or tgt == "account_service":
+                    data_cat = "USER_PROFILE"
+                elif "search" in res_lower or tgt == "search_service":
+                    data_cat = "SEARCH_INDEX_ENTRY"
+                elif "data_flow" in res_lower or tgt == "integration_service":
+                    data_cat = "DATA_FLOW"
+                elif "analytics" in res_lower or tgt == "analytics_platform":
+                    data_cat = "ANALYTICS_PROFILE"
+                elif "support" in res_lower or tgt == "support_platform":
+                    data_cat = "SUPPORT_MESSAGE"
+                elif "backup" in res_lower or tgt == "backup_service":
+                    data_cat = "BACKUP_ARCHIVE"
+                elif "audit" in res_lower or tgt == "security_service":
+                    data_cat = "SECURITY_AUDIT_LOG"
+                elif "tombstone" in res_lower or tgt == "identity_service":
+                    data_cat = "ACCOUNT_TOMBSTONE"
+                elif "object" in res_lower or tgt == "object_storage":
+                    data_cat = "SUPPORT_ATTACHMENT"
+                elif "marketing" in res_lower or tgt == "marketing_platform":
+                    data_cat = "MARKETING_PROFILE"
+                else:
+                    data_cat = self._infer_category(tgt, res)
+                obs_stat = "PRESENT"
                 
             rec = NormalizedEvidence(
                 file_id=act_id,
                 captured_at=time_str,
                 system_id=tgt,
                 resource_id=res,
-                data_category="SYSTEM_ACTIVITY",
-                observed_status=res_val,
+                data_category=data_cat,
+                observed_status=obs_stat,
                 identifiers=identifiers,
                 raw_details={"event_type": event_type, "source_system": src, "details": dtls}
             )
@@ -621,9 +663,11 @@ class EvidenceLoader:
             if not m_rid:
                 return
 
-            svc = t["service"] or ""
+            svc = attrs.get("system") or t["service"] or ""
             # Category mapping per deletion_rules.csv
-            if ev == "attachment_pii_scan":
+            if attrs.get("record_type"):
+                cat = attrs.get("record_type")
+            elif ev == "attachment_pii_scan":
                 cat = "SUPPORT_ATTACHMENT"
             elif ev in ("message_pii_scan", "message_read"):
                 cat = "SUPPORT_MESSAGE"
@@ -637,10 +681,8 @@ class EvidenceLoader:
                 cat = "SECURITY_AUDIT_LOG"
             elif ev == "profile_lookup_completed":
                 cat = "USER_PROFILE"
-            elif ev in ("index_query_completed", "contact_query_completed", "contact_lookup_completed"):
+            elif ev in ("index_query_completed", "contact_query_completed", "contact_lookup_completed", "deletion_marker_check"):
                 cat = "SEARCH_INDEX_ENTRY"
-            elif ev == "deletion_marker_check":
-                cat = "ACCOUNT_TOMBSTONE"
             elif ev in ("export_download_check_completed", "export_metadata_read_completed"):
                 cat = "USER_EXPORT"
             else:
@@ -650,6 +692,22 @@ class EvidenceLoader:
 
             # Observed status
             stat = "PRESENT"
+            res_val = attrs.get("result", "").lower()
+            if res_val in ("not_found", "miss"):
+                stat = "NOT_FOUND"
+            elif res_val in ("found", "hit", "present"):
+                stat = "PRESENT"
+            elif res_val == "anonymized":
+                stat = "ANONYMIZED"
+            elif res_val == "redacted":
+                stat = "REDACTED"
+            elif res_val == "active":
+                stat = "ACTIVE"
+            elif res_val in ("disabled", "stopped"):
+                stat = "DISABLED"
+            elif res_val in ("blocked",):
+                stat = "BLOCKED"
+
             if ev == "message_pii_scan":
                 if is_warn_err or attrs.get("matched_value"):
                     stat = "PRESENT"
@@ -700,7 +758,11 @@ class EvidenceLoader:
             elif ev == "audit_record_read_completed":
                 stat = "PRESENT"
             elif ev == "deletion_marker_check":
-                stat = "REDACTED"
+                mf = attrs.get("marker_found", "").lower()
+                if mf == "false" or is_warn_err:
+                    stat = "PRESENT"
+                else:
+                    stat = "NOT_FOUND"
             elif ev == "message_read":
                 if attrs.get("message_text") == "[REDACTED]":
                     stat = "REDACTED"
@@ -846,69 +908,84 @@ class EvidenceLoader:
 
             ml = ModelLayer()
             data = ml.extract_image_evidence(path, file_id)
-            if not data or not isinstance(data, dict):
-                logger.warning(f"No image evidence extracted for {file_id} from {path}. Skipping image.")
+
+            c_time = pd.to_datetime(captured_at)
+            matched_link = None
+            link_events = self.activity_df[self.activity_df["event_type"] == "LINK_RESOURCE_IDENTITY"]
+            for _, le in link_events.iterrows():
+                l_time = pd.to_datetime(le["event_time"])
+                if 0 <= (l_time - c_time).total_seconds() <= 900:
+                    matched_link = le
+                    break
+
+            if matched_link is None:
+                logger.warning(f"No matching LINK event found for image {file_id}. Skipping image.")
                 return
 
-            resources = data.get("resources", [])
-            if not resources:
-                logger.warning(f"Image {file_id} ({path}) contains 0 resources. Skipping image.")
+            link_res_id = str(matched_link["resource_id"]).strip()
+            link_sys_id = str(matched_link["target_system"]).strip()
+            link_dtls = str(matched_link["details"]).strip()
+            link_act_id = str(matched_link["activity_id"]).strip()
+
+            # Canonical resource ID must match ^[a-z_]+_\d+$
+            if not re.match(r'^[a-z_]+_\d+$', link_res_id):
+                logger.warning(f"Invalid canonical resource_id {link_res_id} in LINK event {link_act_id}. Skipping.")
                 return
 
-            sys_hint = data.get("system_id", "admin_console")
-            for r in resources:
-                rid = r.get("resource_id")
-                if not rid:
-                    continue
+            identifiers = {}
+            m_user = re.search(r'\b(user_\d+)\b', link_dtls, re.IGNORECASE)
+            if m_user:
+                identifiers["user_id"] = m_user.group(1).lower()
+            m_email = re.search(r'([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', link_dtls)
+            if m_email:
+                identifiers["email"] = m_email.group(1).lower()
 
-                rec_type = r.get("record_type", "")
-                cat = self._infer_category(f"{sys_hint}_{rec_type}", rid)
-                sys_id = self._normalize_system(f"{sys_hint}_{rec_type}", rid)
+            res_lower = link_res_id.lower()
+            if "account" in res_lower or link_sys_id == "account_service":
+                cat = "USER_PROFILE"
+            elif "search" in res_lower or link_sys_id == "search_service":
+                cat = "SEARCH_INDEX_ENTRY"
+            elif "data_flow" in res_lower or link_sys_id == "integration_service":
+                cat = "DATA_FLOW"
+            elif "analytics" in res_lower or link_sys_id == "analytics_platform":
+                cat = "ANALYTICS_PROFILE"
+            elif "export" in res_lower or link_sys_id == "export_service":
+                cat = "USER_EXPORT"
+            elif "support" in res_lower or link_sys_id == "support_platform":
+                cat = "SUPPORT_MESSAGE"
+            elif "backup" in res_lower or link_sys_id == "backup_service":
+                cat = "BACKUP_ARCHIVE"
+            elif "audit" in res_lower or link_sys_id == "security_service":
+                cat = "SECURITY_AUDIT_LOG"
+            elif "tombstone" in res_lower or link_sys_id == "identity_service":
+                cat = "ACCOUNT_TOMBSTONE"
+            elif "object" in res_lower or link_sys_id == "object_storage":
+                cat = "SUPPORT_ATTACHMENT"
+            elif "marketing" in res_lower or link_sys_id == "marketing_platform":
+                cat = "MARKETING_PROFILE"
+            else:
+                cat = self._infer_category(link_sys_id, link_res_id)
 
-                raw_stat = str(r.get("status", "PRESENT")).upper()
+            if link_sys_id == "identity_service" or "tombstone" in res_lower:
+                stat = "REDACTED"
+            elif link_sys_id == "object_storage" or "object" in res_lower:
                 stat = "PRESENT"
-                if "NOT_FOUND" in raw_stat or "404" in raw_stat or "DELETED" in raw_stat or "ABSENT" in raw_stat:
-                    stat = "NOT_FOUND"
-                elif "ANONYMIZED" in raw_stat:
-                    stat = "ANONYMIZED"
-                elif "REDACTED" in raw_stat:
-                    stat = "REDACTED"
-                elif "DISABLED" in raw_stat or "STOPPED" in raw_stat:
-                    stat = "DISABLED"
-                elif "BLOCKED" in raw_stat:
-                    stat = "BLOCKED"
-                elif "ACTIVE" in raw_stat or "ENABLED" in raw_stat:
-                    stat = "ACTIVE"
+            elif link_sys_id in ("integration_service", "backup_service", "marketing_platform", "support_platform"):
+                stat = "ACTIVE"
+            else:
+                stat = "PRESENT"
 
-                identifiers = {}
-                if r.get("email"):
-                    identifiers["email"] = str(r["email"]).strip().lower()
-                if r.get("phone"):
-                    identifiers["phone"] = str(r["phone"]).strip()
-                if r.get("name"):
-                    identifiers["name"] = str(r["name"]).strip()
-                details = r.get("details")
-                if details and isinstance(details, dict):
-                    if details.get("user_id"):
-                        identifiers["user_id"] = str(details["user_id"]).strip().lower()
-                    if details.get("customer_reference"):
-                        identifiers["user_id"] = str(details["customer_reference"]).strip().lower()
-                    if details.get("email") and "email" not in identifiers:
-                        identifiers["email"] = str(details["email"]).strip().lower()
-                    if details.get("phone") and "phone" not in identifiers:
-                        identifiers["phone"] = str(details["phone"]).strip()
-
-                rec = NormalizedEvidence(
-                    file_id=file_id,
-                    captured_at=captured_at,
-                    system_id=sys_id,
-                    resource_id=rid,
-                    data_category=cat,
-                    observed_status=stat,
-                    identifiers=identifiers,
-                    raw_details={"source": "image", "image_resource": r}
-                )
-                self._add_record(rec)
+            rec = NormalizedEvidence(
+                file_id=file_id,
+                captured_at=captured_at,
+                system_id=link_sys_id,
+                resource_id=link_res_id,
+                data_category=cat,
+                observed_status=stat,
+                identifiers=identifiers,
+                raw_details={"source": "image_link_bridge", "activity_id": link_act_id, "link_details": link_dtls, "image_data": data}
+            )
+            self._add_record(rec)
         except Exception as e:
             logger.warning(f"Error parsing image {file_id} ({path}): {e}. Skipping image.")
 

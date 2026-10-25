@@ -158,16 +158,25 @@ class DeletionAuditor:
         # Step 3: Discover all resources belonging to this user
         candidate_resources: Set[str] = set()
 
-        # 3a. From direct evidence index
+        # 3a. From direct evidence index within evidence window
         for k in u_keys:
             for rec in self.loader.by_identifier.get(k, []):
                 if rec.resource_id:
-                    candidate_resources.add(rec.resource_id)
+                    if req.requested_at <= rec.captured_at <= req.audit_at:
+                        candidate_resources.add(rec.resource_id)
 
-        # 3b. From catalog links
-        for k in u_keys:
-            if k in self.catalog_links:
-                candidate_resources.update(self.catalog_links[k])
+        # 3b. From LINK-event bridge in [requested_at, audit_at]
+        for _, row in self.activity_df.iterrows():
+            if str(row.get("event_type")) != "LINK_RESOURCE_IDENTITY":
+                continue
+            etime = str(row.get("event_time", ""))
+            if not (req.requested_at <= etime <= req.audit_at):
+                continue
+            dtls = str(row.get("details", "")).lower()
+            if any(k in dtls for k in u_keys):
+                res_id = str(row.get("resource_id", "")).strip()
+                if res_id and re.match(r'^[a-z_]+_\d+$', res_id):
+                    candidate_resources.add(res_id)
 
         # 3c. (Synthetic fallback removed)
 
@@ -198,14 +207,18 @@ class DeletionAuditor:
                     # Match by case sequence or order
                     pass
 
-        # Step 4: Evaluate each candidate resource as-of audit_at
+        # Step 4: Evaluate each candidate resource as-of audit_at within evidence window
         findings: List[Step] = []
         remediations: List[Step] = []
         verifications: List[Step] = []
 
         for rid in sorted(candidate_resources):
-            # Query all evidence records for this resource at or before audit_at
-            ev_list = [r for r in self.loader.by_resource.get(rid, []) if r.file_id.startswith('evidence_') and r.captured_at <= req.audit_at]
+            # Query all evidence records for this resource within the evidence window
+            ev_list = [
+                r for r in self.loader.by_resource.get(rid, [])
+                if (r.file_id.startswith('evidence_') or r.file_id.startswith('activity_'))
+                and (req.requested_at <= r.captured_at <= req.audit_at)
+            ]
             
             # Sort by captured_at descending to find the most recent
             ev_list.sort(key=lambda x: x.captured_at, reverse=True)
