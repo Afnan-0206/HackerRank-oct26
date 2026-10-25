@@ -5,22 +5,31 @@ This section covers telemetry strictly for the final production execution of `py
 
 - **Execution Command**: `python code/main.py --dataset-dir dataset --output-csv output.csv`
 - **Total Requests Evaluated**: 518 cases
-- **Cache Hits**: 518 (100.0%)
-- **Remote Network API Calls**: 0 (0.0%)
+- **Persistent Disk Cache Hits**: 518 (100.0%)
+- **Actual Remote Network API Calls**: 0 (0.0%)
 - **Input (Prompt) Tokens**: 0 tokens
 - **Output (Candidate) Tokens**: 0 tokens
 - **Thinking / Reasoning Tokens**: 0 tokens
 - **Total Network Tokens Consumed**: 0 tokens
-- **Tokens Per Case (Over 518 Cases)**: **0.00 tokens/case** (100% served from local persistent cache)
+- **Tokens Per Case (Over 518 Cases)**: **0.00 tokens/case** (100% served from local persistent disk cache)
 - **Estimated Cost**: **$0.0000 USD**
-- **Runtime & Throughput**: 5.81 seconds (89.2 cases/second)
+- **Runtime & Throughput**: ~8.39 seconds (61.7 cases/second)
 
 ---
 
-## 2. Cache-Building & Offline Preparation Runs
-This section covers the preparation runs that extracted image evidence from PNG screenshots and built the intent classification cache on disk (`code/cache/`):
+## 2. Separate Diagnostic Runs & Historical Cache-Building Activity
 
-### A. Per-Model & Task Breakdown
+### A. Cache-Cold No-Key Diagnostic Run (Offline Verification)
+To verify behavior when caches are completely absent and no API keys are provided:
+- **Environment**: Isolated clean room without `intent_cache.json` or `images/` cache; outbound network sockets blocked.
+- **Provider / Model**: Default configuration with credentials unset (`provider="deterministic"`, `model="rule_based_fallback"`).
+- **Execution**: Evaluated all 518 cases entirely via local rule-based intent and parser logic.
+- **Outcome**: 0 network calls attempted, 0 tokens consumed, $0.00 cost. Produced identical status and step outputs across all 518 cases.
+- **Terminology Note**: Local deterministic fallback decisions are internal rule evaluations; they are not network calls or external model invocations.
+
+### B. Prior Cache-Building & Offline Preparation Runs
+This section covers the historical preparation activity that populated disk caches (`code/cache/`):
+
 | Component | Provider / Mode | Total Unique Texts | Gemini API Classified | Deterministic Fallback | Notes |
 |---|---|---|---|---|---|
 | **Image Evidence (VLM)** | `gemini-2.5-flash` | 11 PNGs | 11 | 0 | All 11 screenshots parsed to disk cache |
