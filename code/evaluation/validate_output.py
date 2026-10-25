@@ -5,6 +5,7 @@ Strictly validates schema, ordering, counts, and constraints.
 
 import os
 import sys
+import re
 import json
 import pandas as pd
 from typing import List, Dict, Set, Any
@@ -88,6 +89,7 @@ def validate_output(output_csv: str, requests_csv: str) -> Dict[str, Any]:
     phase_counts = {"FINDING": 0, "REMEDIATION": 0, "VERIFICATION": 0}
     
     violations: List[str] = []
+    prefix_to_systems: Dict[str, Set[str]] = {}
 
     for idx, row in out_df.iterrows():
         cid = str(row["case_id"])
@@ -109,11 +111,13 @@ def validate_output(output_csv: str, requests_csv: str) -> Dict[str, Any]:
             violations.append(f"steps_json is not an array for {cid}")
             continue
             
-        # NOT_APPLICABLE rule
+        # NOT_APPLICABLE rule: [] only for NOT_APPLICABLE
         if status == "NOT_APPLICABLE":
             if steps != []:
                 violations.append(f"NOT_APPLICABLE case {cid} must have steps_json=[], got {steps}")
             continue
+        elif len(steps) == 0:
+            violations.append(f"{status} case {cid} has empty steps_json=[], only NOT_APPLICABLE permitted to have []")
 
         # COMPLETE invariant: needs at least one VERIFICATION step with non-empty evidence_id; all steps must be VERIFICATION with valid evidence_id
         if status == "COMPLETE":
@@ -156,6 +160,20 @@ def validate_output(output_csv: str, requests_csv: str) -> Dict[str, Any]:
             sys_id = s.get("system_id")
             res_id = s.get("resource_id")
             
+            # Invariant: resource_id must match ^[a-z_]+_\d+$
+            if not res_id or not re.match(r'^[a-z_]+_\d+$', str(res_id)):
+                violations.append(f"Case {cid} non-canonical resource_id '{res_id}' (must match ^[a-z_]+_\\d+$)")
+
+            # Invariant: same-prefix resources must use consistent system_id
+            if res_id and "_" in str(res_id):
+                prefix = str(res_id).rsplit("_", 1)[0]
+                prefix_to_systems.setdefault(prefix, set()).add(str(sys_id))
+                if len(prefix_to_systems[prefix]) > 1:
+                    violations.append(
+                        f"Case {cid} inconsistent system_id for prefix '{prefix}': "
+                        f"seen systems {sorted(list(prefix_to_systems[prefix]))}"
+                    )
+
             try:
                 op_enum = Operation(op)
                 st_enum = ResourceState(st)

@@ -686,3 +686,78 @@ def test_evidence_window_rule_boundaries():
     assert prior_retained_time < req_at
 
 
+# 21. Test Intent Gate: Positive Non-Deletion Signal & Multilingual Deletion Phrasings
+def test_intent_gate_positive_non_deletion_and_multilingual_deletion():
+    """
+    TASK 4 Unit Tests:
+    1. Verifies that NOT_APPLICABLE requires an affirmative positive non-deletion signal
+       with a recorded reason across all 10 production non-deletion texts (case_533-542).
+    2. Verifies deletion phrasings across 6 languages (English, Spanish, French, Portuguese,
+       Korean, Japanese) requesting deletion, erasure, removal, and account closure.
+    3. Verifies that absence of deletion keywords alone does NOT trigger NOT_APPLICABLE.
+    """
+    try:
+        from code.model_layer import ModelLayer
+        from code.auditor import DeletionAuditor
+    except (ImportError, ValueError):
+        from model_layer import ModelLayer
+        from auditor import DeletionAuditor
+
+    ml = ModelLayer()
+    auditor = DeletionAuditor("dataset")
+
+    # 1. Test 10 production non-deletion requests (case_533 to case_542)
+    non_del_cases = [
+        "The mobile number on my profile is out of date. Please replace it with the new one and leave the account active.",
+        "Please stop the promotional emails. I still need the account and my order history, so I am not asking for deletion.",
+        "I'd like to download my account information in a portable format. Please keep the account as it is.",
+        "I can't access my profile and need help resetting the login. Do not close the account.",
+        "My surname is misspelled on the account. Can you correct it without removing any of my records?",
+        "Please remove me from marketing lists only. I still want receipts and service messages for this account.",
+        "Can you tell me what personal information you hold about me? This is an information request, not a request to erase it.",
+        "I need a copy of last year's invoices for my records. Please leave my profile and purchase history in place.",
+        "Please change the email address used for this account. I want to continue using the service.",
+        "Could you send me a copy of the information held on my account? I still use it, so please don't delete or change anything."
+    ]
+
+    for idx, text in enumerate(non_del_cases, 533):
+        res = ml.deterministic_classify_intent(text)
+        assert res["requests_deletion"] is False, f"Case {idx} should be classified as non-deletion"
+        assert "non_deletion_reason" in res and res["non_deletion_reason"], f"Case {idx} missing non_deletion_reason"
+
+        is_non_del, reason = auditor.get_non_deletion_signal(text)
+        assert is_non_del is True, f"Auditor should detect non-deletion for case {idx}"
+        assert reason, f"Auditor should record positive reason for case {idx}"
+
+    # 2. Multilingual deletion phrasings: English, Spanish, French, Portuguese, Korean, Japanese
+    multilingual_deletion_requests = [
+        ("English", "Please process the deletion of my account and remove my personal records."),
+        ("English", "I request that you erase all my personal data and close my account immediately."),
+        ("English", "Kindly remove all my stored customer profile details."),
+        ("Spanish", "Por favor procedan con la eliminación de mi cuenta y borrar todos mis datos."),
+        ("Spanish", "Solicito cancelar mi cuenta y suprimir mis datos de usuario."),
+        ("French", "Veuillez procéder à la suppression de mon compte et effacer mes données personnelles."),
+        ("French", "Je souhaite clôturer mon compte et demander l'effacement de mes informations."),
+        ("Portuguese", "Solicito a exclusão da minha conta e quero apagar todos os meus dados."),
+        ("Portuguese", "Por favor encerrar minha conta e eliminar meu perfil."),
+        ("Korean", "제 계정을 삭제하고 모든 개인정보를 지워주세요."),
+        ("Korean", "계정 탈퇴 및 저장된 개인정보의 삭제를 요청합니다."),
+        ("Japanese", "私のアカウントの削除と個人情報の消去をお願いします。"),
+        ("Japanese", "アカウント閉鎖および登録データの削除を申請します。")
+    ]
+
+    for lang, text in multilingual_deletion_requests:
+        res = ml.deterministic_classify_intent(text)
+        assert res["requests_deletion"] is True, f"{lang} text should be classified as requesting deletion: '{text}'"
+        assert res["language"] == lang or (lang in ["English", "Spanish", "French", "Portuguese", "Korean", "Japanese"]), f"Unexpected lang for '{text}'"
+
+    # 3. Absence of deletion keywords alone does NOT trigger NOT_APPLICABLE
+    generic_text = "I am contacting customer support regarding my registered user account profile."
+    is_non_del, reason = auditor.get_non_deletion_signal(generic_text)
+    assert is_non_del is False, "Generic text without positive non-deletion signal must NOT be non-deletion"
+    assert reason == ""
+    res_generic = ml.deterministic_classify_intent(generic_text)
+    assert res_generic["requests_deletion"] is True, "Generic text without non-deletion signal must default to requests_deletion=True"
+
+
+

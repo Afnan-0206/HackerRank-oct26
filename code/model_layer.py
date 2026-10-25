@@ -183,8 +183,9 @@ class TelemetryTracker:
                 "estimated_cost_usd": m_cost
             }
 
-        tokens_per_case_518 = round(total_tokens / 518.0, 2)
-        cost_per_case_518 = round(total_cost / 518.0, 6)
+        case_count = float(max(1, total_calls))
+        avg_tokens_per_case = round(total_tokens / case_count, 2)
+        avg_cost_per_case = round(total_cost / case_count, 6)
 
         return {
             "total_calls": total_calls,
@@ -198,8 +199,8 @@ class TelemetryTracker:
             "total_candidate_tokens": total_candidate_tokens,
             "total_thinking_tokens": total_thinking_tokens,
             "total_tokens": total_tokens,
-            "tokens_per_case_518": tokens_per_case_518,
-            "cost_per_case_518": cost_per_case_518,
+            "avg_tokens_per_case": avg_tokens_per_case,
+            "avg_cost_per_case": avg_cost_per_case,
             "avg_prompt_tokens": round(avg_prompt_tokens, 2),
             "avg_candidate_tokens": round(avg_candidate_tokens, 2),
             "avg_thinking_tokens": round(avg_thinking_tokens, 2),
@@ -223,7 +224,7 @@ class TelemetryTracker:
 
         md = f"""# LLM / VLM Telemetry & Usage Report
 
-## 1. Production Run Telemetry (Single Execution over 518 Cases)
+## 1. Production Run Telemetry (Single Execution)
 - **Providers Configured**: {', '.join(summary['providers']) or 'None'}
 - **Models Active**: {', '.join(summary['models']) or 'None'}
 - **Total Requests Evaluated**: {summary['total_calls']}
@@ -233,9 +234,9 @@ class TelemetryTracker:
 - **Output (Candidate) Tokens**: {summary['total_candidate_tokens']:,}
 - **Thinking / Reasoning Tokens**: {summary['total_thinking_tokens']:,}
 - **Total Tokens Consumed**: {summary['total_tokens']:,}
-- **Tokens Per Case (Over 518 Cases)**: **{summary['tokens_per_case_518']} tokens/case**
+- **Tokens Per Case**: **{summary['avg_tokens_per_case']} tokens/case**
 - **Estimated Total Cost**: **${summary['total_cost_usd']:.4f} USD**
-- **Cost Per Case (Over 518 Cases)**: **${summary['cost_per_case_518']:.6f} USD/case**
+- **Cost Per Case**: **${summary['avg_cost_per_case']:.6f} USD/case**
 - **Average Network Latency**: {summary['avg_latency_ms']} ms
 
 ## 2. Per-Model Breakdown
@@ -397,11 +398,17 @@ class ModelLayer:
             "esportazione",
         ]
 
-        # Deletion markers
+        # Deletion markers across supported languages (English, Spanish, French, German, Japanese, Portuguese, Italian, Korean)
         del_markers = [
             "delete", "deletion", "remove", "removal", "erase", "erasure", "purge", "forget",
-            "close my account", "close this account",
-            "eliminar", "eliminación", "supprimer", "suppression", "löschen", "削除", "삭제", "excluir", "exclusão", "cancellare"
+            "close my account", "close this account", "terminate my account",
+            "eliminar", "eliminación", "borrar", "cancelar mi cuenta",
+            "supprimer", "suppression", "effacer", "effacement", "clôturer mon compte",
+            "löschen", "löschung", "konto schließen",
+            "削除", "消去", "アカウント閉鎖", "アカウント削除",
+            "삭제", "지워주세요", "계정 삭제", "탈퇴",
+            "excluir", "exclusão", "apagar", "encerrar minha conta",
+            "cancellare", "cancellazione"
         ]
 
         has_negated_del = any(m in txt for m in negated_del_markers)
@@ -410,17 +417,19 @@ class ModelLayer:
 
         # Detect language
         lang = "English"
-        if any(w in txt for w in ["por favor", "eliminen", "cuenta", "datos", "guardada", "qué información"]):
+        if any(w in txt for w in ["por favor", "eliminen", "cuenta", "datos", "guardada", "qué información", "borrar"]):
             lang = "Spanish"
-        elif any(w in txt for w in ["veuillez", "supprimer", "compte", "données", "gardez", "pouvez-vous"]):
+        elif any(w in txt for w in ["veuillez", "supprimer", "compte", "données", "gardez", "pouvez-vous", "effacer"]):
             lang = "French"
         elif any(w in txt for w in ["bitte", "löschen", "benutzerkonto", "daten", "auskunft"]):
             lang = "German"
+        elif any(0xAC00 <= ord(c) <= 0xD7A3 for c in txt):
+            lang = "Korean"
         elif any(ord(c) > 0x3000 for c in txt):
             lang = "Japanese"
-        elif any(w in txt for w in ["solicito", "exclusão", "meus dados", "minha conta"]):
+        elif any(w in txt for w in ["solicito", "exclusão", "meus dados", "minha conta", "apagar", "excluir"]):
             lang = "Portuguese"
-        elif any(w in txt for w in ["cancellate", "mio account", "vorrei"]):
+        elif any(w in txt for w in ["cancellate", "mio account", "vorrei", "cancellare"]):
             lang = "Italian"
 
         # Check for mixed requests: user wants to delete account but retain specific records
@@ -438,6 +447,7 @@ class ModelLayer:
                 "evidence_quote": quote or request_text[:60]
             }
 
+        # Positive non-deletion signal required to classify as non-deletion (NOT_APPLICABLE)
         if has_negated_del or is_non_del:
             quote = ""
             for m in (negated_del_markers + non_del_markers):
@@ -447,26 +457,21 @@ class ModelLayer:
             return {
                 "requests_deletion": False,
                 "language": lang,
-                "evidence_quote": quote or request_text[:60]
+                "evidence_quote": quote or request_text[:60],
+                "non_deletion_reason": f"Positive non-deletion signal: '{quote or request_text[:40]}'"
             }
 
-        if has_del:
-            quote = ""
-            for m in del_markers:
-                if m in txt:
-                    quote = m
-                    break
-            return {
-                "requests_deletion": True,
-                "language": lang,
-                "evidence_quote": quote or request_text[:60]
-            }
-
-        # If no deletion keywords present, default to False
+        # If no positive non-deletion signal is present, default to True (requests deletion)
+        # to ensure NOT_APPLICABLE strictly requires an affirmative non-deletion signal with a recorded reason
+        quote = ""
+        for m in del_markers:
+            if m in txt:
+                quote = m
+                break
         return {
-            "requests_deletion": False,
+            "requests_deletion": True,
             "language": lang,
-            "evidence_quote": request_text[:60]
+            "evidence_quote": quote or request_text[:60]
         }
 
     def classify_intent(self, request_text: str) -> Dict[str, Any]:

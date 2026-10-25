@@ -82,10 +82,15 @@ class DeletionAuditor:
             if pd.notna(res) and res:
                 self.res_policy_map[str(res)] = r["event_type"]
 
-    def is_non_deletion_request(self, request_text: str) -> bool:
+        # Pre-filter LINK events as dict records for fast candidate discovery
+        self.link_event_records = self.activity_df[
+            self.activity_df["event_type"] == "LINK_RESOURCE_IDENTITY"
+        ].to_dict("records")
+
+    def get_non_deletion_signal(self, request_text: str) -> Tuple[bool, str]:
         """
         Detect requests that explicitly ask NOT to delete or ask for rectification/access/portability/opt-out
-        without account deletion.
+        without account deletion. Requires an affirmative positive non-deletion signal with a recorded reason.
         """
         txt = request_text.lower()
         non_del_markers = [
@@ -122,21 +127,33 @@ class DeletionAuditor:
             "削除しないで",
             "non cancellate",
         ]
-        return any(marker in txt for marker in non_del_markers)
+        for marker in non_del_markers:
+            if marker in txt:
+                return True, f"Positive non-deletion signal detected: '{marker}'"
+        return False, ""
+
+    def is_non_deletion_request(self, request_text: str) -> bool:
+        is_non_del, _ = self.get_non_deletion_signal(request_text)
+        return is_non_del
 
     def audit_case(self, req: DeletionRequest, model_layer: Optional[Any] = None) -> Tuple[DeletionStatus, List[Step]]:
         """
         Audit a single deletion request. Returns (status, ordered_steps).
         """
         # Step 1: Intent Gate (Model + Policy Rule with conservative disagreement resolution)
-        rule_requests_del = not self.is_non_deletion_request(req.request_text)
+        # NOT_APPLICABLE strictly requires an affirmative positive non-deletion signal with a recorded reason
+        is_positive_non_del, non_del_reason = self.get_non_deletion_signal(req.request_text)
+        rule_requests_del = not is_positive_non_del
         
         if model_layer is not None:
             model_res = model_layer.classify_intent(req.request_text)
             model_requests_del = model_res.get("requests_deletion", True)
+            model_non_del_reason = model_res.get("non_deletion_reason", "")
             
             # The model never overrides the policy engine, and disagreement defaults to the more conservative outcome
-            if not rule_requests_del or not model_requests_del:
+            if not rule_requests_del:
+                return DeletionStatus.NOT_APPLICABLE, []
+            elif not model_requests_del and model_non_del_reason:
                 return DeletionStatus.NOT_APPLICABLE, []
         else:
             if not rule_requests_del:
@@ -166,9 +183,7 @@ class DeletionAuditor:
                         candidate_resources.add(rec.resource_id)
 
         # 3b. From LINK-event bridge in [requested_at, audit_at]
-        for _, row in self.activity_df.iterrows():
-            if str(row.get("event_type")) != "LINK_RESOURCE_IDENTITY":
-                continue
+        for row in self.link_event_records:
             etime = str(row.get("event_time", ""))
             if not (req.requested_at <= etime <= req.audit_at):
                 continue

@@ -805,6 +805,34 @@ class EvidenceLoader:
             emit_log_record(t, t["subject_keys"])
 
     def _infer_category(self, context: str, resource_id: str) -> str:
+        r_low = resource_id.lower()
+        if r_low.startswith("tombstone_"):
+            return "ACCOUNT_TOMBSTONE"
+        if r_low.startswith("account_"):
+            return "USER_PROFILE"
+        if r_low.startswith("object_"):
+            return "SUPPORT_ATTACHMENT"
+        if r_low.startswith("search_"):
+            return "SEARCH_INDEX_ENTRY"
+        if r_low.startswith("analytics_"):
+            return "ANALYTICS_PROFILE"
+        if r_low.startswith("data_flow_"):
+            return "DATA_FLOW"
+        if r_low.startswith("backup_"):
+            return "BACKUP_ARCHIVE"
+        if r_low.startswith("export_"):
+            return "USER_EXPORT"
+        if r_low.startswith("marketing_"):
+            return "MARKETING_PROFILE"
+        if r_low.startswith("audit_record_") or r_low.startswith("audit_"):
+            return "SECURITY_AUDIT_LOG"
+        if r_low.startswith("legal_hold_") or r_low.startswith("hold_"):
+            return "LEGAL_HOLD_RECORD"
+        if r_low.startswith("support_"):
+            if "attachment" in context.lower():
+                return "SUPPORT_ATTACHMENT"
+            return "SUPPORT_MESSAGE"
+
         ctx = (context + "_" + resource_id).lower()
         if "tombstone" in ctx:
             return "ACCOUNT_TOMBSTONE"
@@ -831,6 +859,32 @@ class EvidenceLoader:
         return "UNKNOWN"
 
     def _normalize_system(self, system_hint: str, resource_id: str) -> str:
+        r_low = resource_id.lower()
+        if r_low.startswith("account_"):
+            return "account_service"
+        if r_low.startswith("search_"):
+            return "search_service"
+        if r_low.startswith("analytics_"):
+            return "analytics_platform"
+        if r_low.startswith("support_"):
+            return "support_platform"
+        if r_low.startswith("data_flow_"):
+            return "integration_service"
+        if r_low.startswith("backup_"):
+            return "backup_service"
+        if r_low.startswith("export_"):
+            return "export_service"
+        if r_low.startswith("audit_record_") or r_low.startswith("audit_"):
+            return "security_service"
+        if r_low.startswith("tombstone_"):
+            return "identity_service"
+        if r_low.startswith("marketing_"):
+            return "marketing_platform"
+        if r_low.startswith("object_"):
+            return "object_storage"
+        if r_low.startswith("legal_hold_") or r_low.startswith("hold_"):
+            return "legal_service"
+
         hint = (system_hint + "_" + resource_id).lower()
         if "account" in hint or "profile" in hint:
             return "account_service"
@@ -911,15 +965,48 @@ class EvidenceLoader:
 
             c_time = pd.to_datetime(captured_at)
             matched_link = None
+            fname = os.path.basename(path).lower()
+            image_text = json.dumps(data).lower() if isinstance(data, (dict, list)) else str(data).lower()
+
+            # 1. Candidate LINK events within 15-minute time proximity
             link_events = self.activity_df[self.activity_df["event_type"] == "LINK_RESOURCE_IDENTITY"]
+            time_candidates = []
             for _, le in link_events.iterrows():
                 l_time = pd.to_datetime(le["event_time"])
-                if 0 <= (l_time - c_time).total_seconds() <= 900:
-                    matched_link = le
-                    break
+                delta = (l_time - c_time).total_seconds()
+                if 0 <= delta <= 900:
+                    time_candidates.append(le)
 
-            if matched_link is None:
-                logger.warning(f"No matching LINK event found for image {file_id}. Skipping image.")
+            # 2. Strengthened binding: verify content presence in screenshot's extracted text
+            content_matches = []
+            for cand in time_candidates:
+                cand_res_id = str(cand["resource_id"]).strip().lower()
+                cand_dtls = str(cand["details"]).lower()
+
+                # Match resource_id in screenshot text
+                res_match = bool(cand_res_id and cand_res_id in image_text)
+
+                # Match file name (image file name in details or file name in screenshot)
+                file_match = bool(fname and (fname in cand_dtls or fname in image_text))
+                m_fn = re.findall(r'[\w\-.]+\.(?:pdf|png|csv|json|log)', cand_dtls)
+                if any(f in image_text for f in m_fn):
+                    file_match = True
+
+                # Match email in screenshot text
+                m_email = re.findall(r'[\w.+-]+@[\w-]+\.[\w.-]+', cand_dtls)
+                email_match = any(e in image_text for e in m_email)
+
+                if res_match or file_match or email_match:
+                    content_matches.append(cand)
+
+            # 3. Selection: content match preferred; fall back to time only if exactly one candidate exists
+            if len(content_matches) >= 1:
+                matched_link = content_matches[0]
+            elif len(time_candidates) == 1:
+                # Fallback to time proximity only when exactly one candidate exists
+                matched_link = time_candidates[0]
+            else:
+                logger.warning(f"No unambiguous LINK event found for image {file_id} ({len(time_candidates)} candidates). Skipping.")
                 return
 
             link_res_id = str(matched_link["resource_id"]).strip()
