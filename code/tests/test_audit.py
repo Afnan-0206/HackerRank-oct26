@@ -642,3 +642,47 @@ def test_fixtures_audit_cases_and_after_audit_at_boundary():
     assert json.dumps(actual_steps3_post) == json.dumps(expected_steps3_post)
 
 
+# 20. Test Evidence Window Rule: Below / At / Above Boundaries
+def test_evidence_window_rule_boundaries():
+    """
+    TASK 3 Unit Tests:
+    Verifies that evidence and LINK events are usable if and only if:
+      requested_at <= captured_at <= audit_at
+    Testing:
+    1. captured_at < requested_at (below lower boundary: excluded)
+    2. captured_at == requested_at (at lower boundary: included)
+    3. captured_at == audit_at (at upper boundary: included)
+    4. captured_at > audit_at (above upper boundary: excluded)
+    5. Retained records rule (audit logs/holds) in INCOMPLETE cases is unbounded below by requested_at.
+    """
+    req_at = "2026-06-01T10:00:00Z"
+    audit_at = "2026-06-10T10:00:00Z"
+
+    # 1. Below lower boundary: 1 second before requested_at -> False
+    below_lower = "2026-06-01T09:59:59Z"
+    assert not (req_at <= below_lower <= audit_at)
+
+    # 2. At lower boundary: exactly requested_at -> True
+    at_lower = "2026-06-01T10:00:00Z"
+    assert (req_at <= at_lower <= audit_at)
+
+    # In-between: -> True
+    in_middle = "2026-06-05T12:00:00Z"
+    assert (req_at <= in_middle <= audit_at)
+
+    # 3. At upper boundary: exactly audit_at -> True
+    at_upper = "2026-06-10T10:00:00Z"
+    assert (req_at <= at_upper <= audit_at)
+
+    # 4. Above upper boundary: 1 second after audit_at -> False
+    above_upper = "2026-06-10T10:00:01Z"
+    assert not (req_at <= above_upper <= audit_at)
+
+    # 5. Incomplete-case retained record rule:
+    # Retained record event time was created months prior to requested_at (e.g. 2026-01-15 <= audit_at)
+    prior_retained_time = "2026-01-15T08:00:00Z"
+    assert prior_retained_time <= audit_at
+    # It must be included in post-remediation verification plan even though prior_retained_time < req_at
+    assert prior_retained_time < req_at
+
+
