@@ -95,9 +95,7 @@ def test_step_phase_and_operation_ordering():
 
 
 # 3. Test NOT_APPLICABLE detection
-def test_not_applicable_requests():
-    auditor = DeletionAuditor("dataset")
-    
+def test_not_applicable_requests(auditor):
     non_del_texts = [
         "Please remove me from marketing lists only, but leave the account active for orders.",
         "I need a copy of my data under GDPR Article 15; keep the account as it is.",
@@ -117,8 +115,8 @@ def test_not_applicable_requests():
 
 
 # 4. Test Timestamp Boundary Enforcement
-def test_timestamp_boundary_filtering():
-    loader = DeletionAuditor("dataset").loader
+def test_timestamp_boundary_filtering(evidence_loader):
+    loader = evidence_loader
     test_res = "account_5334" # Has early and late evidence
     cutoff = "2026-09-02T12:00:00Z"
     
@@ -131,8 +129,8 @@ def test_timestamp_boundary_filtering():
 
 
 # 5. Test Identity Resolution across history
-def test_identity_resolution_changes():
-    resolver = IdentityResolver("dataset")
+def test_identity_resolution_changes(identity_resolver):
+    resolver = identity_resolver
     
     # user_30 changed email from camille.bernard86@outlook.com to camille.bernard@outlook.com
     user_old = resolver.resolve_by_email("camille.bernard86@outlook.com")
@@ -253,8 +251,7 @@ def test_csv_emission_escaping(tmp_path):
 
 
 # 11. Regression Fixture: Case 11
-def test_regression_case_11_fixture():
-    auditor = DeletionAuditor("dataset")
+def test_regression_case_11_fixture(auditor):
     req = DeletionRequest(
         case_id="case_11",
         email="novak.tomasz@icloud.com",
@@ -298,13 +295,12 @@ def test_team_case_1_failover_replica_drift():
 
 
 # 13. Team Test Case 2: Marketing Unsubscribe Mistaken for Deletion
-def test_team_case_2_marketing_unsubscribe():
+def test_team_case_2_marketing_unsubscribe(auditor):
     """
     Simulates user submitting privacy request stating:
     'Please unsubscribe me from marketing emails. Do not delete my order history.'
     System must classify as NOT_APPLICABLE and output steps_json=[].
     """
-    auditor = DeletionAuditor("dataset")
     req = DeletionRequest(
         case_id="case_custom_marketing",
         email="shopper@example.com",
@@ -351,7 +347,7 @@ def test_team_case_3_legal_hold_and_tombstone():
 
 
 # 15. Test Evidence Timestamp Boundary Filtering (captured_at <= audit_at)
-def test_evidence_timestamp_boundary_filtering():
+def test_evidence_timestamp_boundary_filtering(evidence_loader):
     """
     Verifies that evidence is included if and only if captured_at <= audit_at.
     Boundary conditions:
@@ -361,7 +357,7 @@ def test_evidence_timestamp_boundary_filtering():
     Also verifies that evidence_files.csv manifest captured_at is authoritative
     over internal snapshot timestamps (e.g. evidence_02 vs evidence_92).
     """
-    loader = EvidenceLoader("dataset")
+    loader = evidence_loader
     
     # Check that loader assigns authoritative captured_at from manifest
     assert loader.file_meta["evidence_02"]["captured_at"] == "2026-09-17T12:00:00Z"
@@ -509,7 +505,7 @@ def test_rules_5_and_6_unmet_conditions_emit_nothing_and_log_needs_review(caplog
 
 
 # 18. Test INCOMPLETE-Only Retained-Record Rule
-def test_incomplete_only_retained_record_rule():
+def test_incomplete_only_retained_record_rule(auditor):
     """
     Verifies that:
     1. In an INCOMPLETE case (e.g. case_09, where remaining records exist), policy-mandated
@@ -518,7 +514,6 @@ def test_incomplete_only_retained_record_rule():
     2. In a COMPLETE case (e.g. case_03, case_21), retained records MUST be verified by evidence
        captured at or before audit_at with a non-empty evidence_id. Future-captured evidence is excluded.
     """
-    auditor = DeletionAuditor("dataset")
     
     # case_09 is INCOMPLETE (audit_at=2026-09-16T09:00:00Z, evidence_06 captured_at=2026-09-18T11:55:24Z)
     req_09 = DeletionRequest(
@@ -687,7 +682,7 @@ def test_evidence_window_rule_boundaries():
 
 
 # 21. Test Intent Gate: Positive Non-Deletion Signal & Multilingual Deletion Phrasings
-def test_intent_gate_positive_non_deletion_and_multilingual_deletion():
+def test_intent_gate_positive_non_deletion_and_multilingual_deletion(auditor):
     """
     TASK 4 Unit Tests:
     1. Verifies that NOT_APPLICABLE requires an affirmative positive non-deletion signal
@@ -698,13 +693,10 @@ def test_intent_gate_positive_non_deletion_and_multilingual_deletion():
     """
     try:
         from code.model_layer import ModelLayer
-        from code.auditor import DeletionAuditor
     except (ImportError, ValueError):
         from model_layer import ModelLayer
-        from auditor import DeletionAuditor
 
     ml = ModelLayer()
-    auditor = DeletionAuditor("dataset")
 
     # 1. Test 10 production non-deletion requests (case_533 to case_542)
     non_del_cases = [
@@ -799,8 +791,7 @@ def test_policy_engine_marketing_profile_rule_10():
 
 
 # 23. Test Empirical Absence Snapshot Verification in COMPLETE Cases
-def test_complete_absence_evidence_upgrade():
-    auditor = DeletionAuditor("dataset")
+def test_complete_absence_evidence_upgrade(auditor):
     req = DeletionRequest(
         case_id="case_01",
         email="amina.elmasri@gmail.com",
@@ -820,6 +811,28 @@ def test_complete_absence_evidence_upgrade():
     assert step.resource_id == "account_001"
     # Must cite genuine empirical database snapshot (evidence_54) rather than operational worker log (activity_xxxx)
     assert step.evidence_id == "evidence_54"
+
+
+# 24. Test Shared Fixtures and In-Memory Precomputed Cache Speed
+def test_shared_fixtures_and_caching_speed(shared_evidence_loader, shared_identity_resolver, shared_auditor):
+    import time
+    from evidence_loader import _SQL_TABLES_CACHE, _LOG_TOKENS_CACHE
+
+    assert isinstance(shared_evidence_loader, EvidenceLoader)
+    assert isinstance(shared_identity_resolver, IdentityResolver)
+    assert isinstance(shared_auditor, DeletionAuditor)
+
+    # In-memory caches are populated
+    assert len(_SQL_TABLES_CACHE) > 0, "Parsed SQLite tables cache should be populated"
+    assert len(_LOG_TOKENS_CACHE) > 0, "Parsed log tokens cache should be populated"
+
+    # Rapid re-instantiation leveraging precomputed in-memory caches
+    t0 = time.time()
+    reloaded_loader = EvidenceLoader("dataset")
+    t1 = time.time()
+    assert (t1 - t0) < 1.0, f"Reloaded EvidenceLoader took {t1 - t0:.2f}s, expected < 1.0s with memory caches"
+    assert len(reloaded_loader.records) == len(shared_evidence_loader.records)
+
 
 
 

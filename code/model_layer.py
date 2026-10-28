@@ -58,6 +58,11 @@ IMAGE_EXTRACTION_SCHEMA = {
 
 class TelemetryTracker:
     def __init__(self, log_path: str = "code/cache/telemetry.jsonl", pricing_config_path: str = "code/pricing_config.json"):
+        base_code_dir = os.path.dirname(os.path.abspath(__file__))
+        if log_path == "code/cache/telemetry.jsonl":
+            log_path = os.path.join(base_code_dir, "cache", "telemetry.jsonl")
+        if pricing_config_path == "code/pricing_config.json":
+            pricing_config_path = os.path.join(base_code_dir, "pricing_config.json")
         self.log_path = log_path
         self.pricing_config_path = pricing_config_path
         self.pricing_config = self._load_pricing()
@@ -285,6 +290,12 @@ class ModelLayer:
         pricing_config_path: str = "code/pricing_config.json",
         telemetry: Optional[TelemetryTracker] = None
     ):
+        base_code_dir = os.path.dirname(os.path.abspath(__file__))
+        if cache_dir == "code/cache":
+            cache_dir = os.path.join(base_code_dir, "cache")
+        if pricing_config_path == "code/pricing_config.json":
+            pricing_config_path = os.path.join(base_code_dir, "pricing_config.json")
+
         self.cache_dir = cache_dir
         self.pricing_config_path = pricing_config_path
         self.images_cache_dir = os.path.join(cache_dir, "images")

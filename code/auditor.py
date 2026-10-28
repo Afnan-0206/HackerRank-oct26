@@ -46,41 +46,50 @@ except (ImportError, ValueError):
 
 
 class DeletionAuditor:
-    def __init__(self, dataset_dir: str):
-        self.dataset_dir = dataset_dir
-        self.resolver = IdentityResolver(dataset_dir)
-        self.loader = EvidenceLoader(dataset_dir)
+    def __init__(
+        self,
+        dataset_dir: str,
+        resolver: Optional[IdentityResolver] = None,
+        loader: Optional[EvidenceLoader] = None,
+    ):
+        self.loader = loader if loader is not None else EvidenceLoader(dataset_dir)
+        self.dataset_dir = self.loader.dataset_dir
+        self.resolver = resolver if resolver is not None else IdentityResolver(self.dataset_dir)
         self.policy_engine = PolicyEngine()
         
-        # Load system activity
-        self.activity_df = pd.read_csv(os.path.join(dataset_dir, "system_activity.csv"))
+        # Load system activity (reuse already loaded dataframe from loader if available)
+        if hasattr(self.loader, "activity_df") and self.loader.activity_df is not None:
+            self.activity_df = self.loader.activity_df
+        else:
+            self.activity_df = pd.read_csv(os.path.join(self.dataset_dir, "system_activity.csv"))
         self.del_workers = self.activity_df[
             self.activity_df["source_system"].isin(["deletion_worker", "security_service", "privacy_workflow"])
         ].copy()
         
         # Build catalog map: user_key -> set of resource_ids
         self.catalog_links: Dict[str, Set[str]] = {}
-        for _, row in self.activity_df.iterrows():
-            dtls = str(row["details"])
-            res_id = str(row["resource_id"]) if pd.notna(row["resource_id"]) else ""
+        details_col = self.activity_df["details"].fillna("").astype(str).tolist()
+        res_id_col = self.activity_df["resource_id"].fillna("").astype(str).tolist()
+        re_res = re.compile(r'\b([a-zA-Z0-9_\-]+_[0-9]+)\b')
+        re_user = re.compile(r'\b(user_\d+)\b', re.IGNORECASE)
+        re_email = re.compile(r'([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)')
+        for dtls, res_id in zip(details_col, res_id_col):
             if not res_id:
-                m_res = re.search(r'\b([a-zA-Z0-9_\-]+_[0-9]+)\b', dtls)
+                m_res = re_res.search(dtls)
                 if m_res:
                     res_id = m_res.group(1)
             if res_id:
-                for m_u in re.finditer(r'\b(user_\d+)\b', dtls, re.IGNORECASE):
-                    uk = m_u.group(1).lower()
-                    self.catalog_links.setdefault(uk, set()).add(res_id)
-                for m_e in re.finditer(r'([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', dtls):
-                    ek = m_e.group(1).lower()
-                    self.catalog_links.setdefault(ek, set()).add(res_id)
+                for m_u in re_user.finditer(dtls):
+                    self.catalog_links.setdefault(m_u.group(1).lower(), set()).add(res_id)
+                for m_e in re_email.finditer(dtls):
+                    self.catalog_links.setdefault(m_e.group(1).lower(), set()).add(res_id)
 
         # Build policy map from system activity
         self.res_policy_map: Dict[str, str] = {}
-        for _, r in self.del_workers.iterrows():
-            res = r["resource_id"]
-            if pd.notna(res) and res:
-                self.res_policy_map[str(res)] = r["event_type"]
+        if not self.del_workers.empty:
+            for res, ev_type in zip(self.del_workers["resource_id"].tolist(), self.del_workers["event_type"].tolist()):
+                if pd.notna(res) and res:
+                    self.res_policy_map[str(res)] = str(ev_type)
 
         # Pre-filter LINK events as dict records for fast candidate discovery
         self.link_event_records = self.activity_df[

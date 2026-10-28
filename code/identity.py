@@ -13,8 +13,23 @@ except (ImportError, ValueError):
 
 
 class IdentityResolver:
+    @staticmethod
+    def _resolve_dataset_dir(dataset_dir: str) -> str:
+        candidates = [
+            dataset_dir,
+            os.path.abspath(dataset_dir),
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "dataset")),
+            os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "dataset")),
+            os.path.join(os.getcwd(), dataset_dir),
+            os.path.join(os.getcwd(), "hackerrank-orchestrate-october26", dataset_dir),
+        ]
+        for c in candidates:
+            if os.path.exists(os.path.join(c, "user_identities.csv")):
+                return os.path.abspath(os.path.realpath(c))
+        return os.path.abspath(os.path.realpath(dataset_dir))
+
     def __init__(self, dataset_dir: str):
-        self.dataset_dir = dataset_dir
+        self.dataset_dir = self._resolve_dataset_dir(dataset_dir)
         self.identities_by_id: Dict[str, UserIdentity] = {}
         self.email_to_id: Dict[str, str] = {}
         self._load_identities()

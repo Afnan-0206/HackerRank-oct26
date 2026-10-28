@@ -19,12 +19,43 @@ try:
 except (ImportError, ValueError):
     from models import NormalizedEvidence, UserIdentity
 
+# In-memory precomputed caches for parsed SQLite tables and log tokens
+_SQL_TABLES_CACHE: Dict[str, List[Tuple[str, List[str], List[Tuple[Any, ...]]]]] = {}
+_LOG_TOKENS_CACHE: Dict[str, List[Dict[str, Any]]] = {}
+_DATASET_CACHE: Dict[str, Any] = {}
+
 
 class EvidenceLoader:
+    @staticmethod
+    def _resolve_dataset_dir(dataset_dir: str) -> str:
+        candidates = [
+            dataset_dir,
+            os.path.abspath(dataset_dir),
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "dataset")),
+            os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "dataset")),
+            os.path.join(os.getcwd(), dataset_dir),
+            os.path.join(os.getcwd(), "hackerrank-orchestrate-october26", dataset_dir),
+        ]
+        for c in candidates:
+            if os.path.exists(os.path.join(c, "evidence_files.csv")):
+                return os.path.abspath(os.path.realpath(c))
+        return os.path.abspath(os.path.realpath(dataset_dir))
+
     def __init__(self, dataset_dir: str):
-        self.dataset_dir = dataset_dir
-        self.evidence_files_df = pd.read_csv(os.path.join(dataset_dir, "evidence_files.csv"))
-        self.activity_df = pd.read_csv(os.path.join(dataset_dir, "system_activity.csv"))
+        self.dataset_dir = self._resolve_dataset_dir(dataset_dir)
+        norm_dir = self.dataset_dir
+        if norm_dir in _DATASET_CACHE:
+            cached = _DATASET_CACHE[norm_dir]
+            self.evidence_files_df = cached["evidence_files_df"]
+            self.activity_df = cached["activity_df"]
+            self.file_meta = cached["file_meta"]
+            self.records = list(cached["records"])
+            self.by_resource = {k: list(v) for k, v in cached["by_resource"].items()}
+            self.by_identifier = {k: list(v) for k, v in cached["by_identifier"].items()}
+            return
+
+        self.evidence_files_df = pd.read_csv(os.path.join(self.dataset_dir, "evidence_files.csv"))
+        self.activity_df = pd.read_csv(os.path.join(self.dataset_dir, "system_activity.csv"))
         
         # File metadata: file_id -> row dict
         self.file_meta: Dict[str, Dict[str, str]] = {}
@@ -47,6 +78,15 @@ class EvidenceLoader:
         self._load_system_activity()
         self._load_all_evidence_files()
 
+        _DATASET_CACHE[norm_dir] = {
+            "evidence_files_df": self.evidence_files_df,
+            "activity_df": self.activity_df,
+            "file_meta": self.file_meta,
+            "records": list(self.records),
+            "by_resource": {k: list(v) for k, v in self.by_resource.items()},
+            "by_identifier": {k: list(v) for k, v in self.by_identifier.items()},
+        }
+
     def _add_record(self, record: NormalizedEvidence):
         # Authoritative manifest timestamp from evidence_files.csv overrides any inner timestamps
         if record.file_id in self.file_meta:
@@ -61,6 +101,12 @@ class EvidenceLoader:
 
     def _load_system_activity(self):
         """Index linking events and activity traces."""
+        image_dts = [
+            pd.to_datetime(f_meta["captured_at"])
+            for f_meta in self.file_meta.values()
+            if "evidence/images/" in f_meta.get("file_path", "")
+        ]
+
         for _, row in self.activity_df.iterrows():
             act_id = str(row["activity_id"])
             event_type = str(row["event_type"])
@@ -84,15 +130,8 @@ class EvidenceLoader:
             obs_stat = res_val
             if event_type == "LINK_RESOURCE_IDENTITY":
                 # Check if a screenshot image exists in file_meta within 15 minutes
-                has_image = False
                 e_dt = pd.to_datetime(time_str)
-                for f_meta in self.file_meta.values():
-                    if "evidence/images/" in f_meta.get("file_path", ""):
-                        c_dt = pd.to_datetime(f_meta.get("captured_at", ""))
-                        if 0 <= (e_dt - c_dt).total_seconds() <= 900:
-                            has_image = True
-                            break
-                if has_image:
+                if any(0 <= (e_dt - c_dt).total_seconds() <= 900 for c_dt in image_dts):
                     continue  # Image parser will create the authoritative screenshot record
 
                 res_lower = res.lower()
@@ -366,22 +405,30 @@ class EvidenceLoader:
     def _parse_sql(self, file_id: str, captured_at: str, path: str):
         """Parse SQLite snapshot tables."""
         try:
-            conn = sqlite3.connect(":memory:")
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                sql_script = f.read()
-            conn.executescript(sql_script)
-            cursor = conn.cursor()
-            
-            # List tables
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-            tables = [r[0] for r in cursor.fetchall()]
-
-            for tname in tables:
-                cursor.execute(f"PRAGMA table_info({tname});")
-                cols = [c[1] for c in cursor.fetchall()]
-                cursor.execute(f"SELECT * FROM {tname};")
-                rows = cursor.fetchall()
+            if path in _SQL_TABLES_CACHE:
+                table_entries = _SQL_TABLES_CACHE[path]
+            else:
+                conn = sqlite3.connect(":memory:")
+                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    sql_script = f.read()
+                conn.executescript(sql_script)
+                cursor = conn.cursor()
                 
+                # List tables
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+                tables = [r[0] for r in cursor.fetchall()]
+
+                table_entries = []
+                for tname in tables:
+                    cursor.execute(f"PRAGMA table_info({tname});")
+                    cols = [c[1] for c in cursor.fetchall()]
+                    cursor.execute(f"SELECT * FROM {tname};")
+                    rows = cursor.fetchall()
+                    table_entries.append((tname, cols, rows))
+                conn.close()
+                _SQL_TABLES_CACHE[path] = table_entries
+
+            for tname, cols, rows in table_entries:
                 for row_data in rows:
                     rdict = dict(zip(cols, row_data))
                     res_id = str(rdict.get("resource_id", ""))
@@ -464,7 +511,6 @@ class EvidenceLoader:
                         raw_details=merged_dict
                     )
                     self._add_record(rec)
-            conn.close()
         except Exception:
             pass
 
@@ -630,21 +676,28 @@ class EvidenceLoader:
             "support_ticket_read_started"
         }
 
+        if path in _LOG_TOKENS_CACHE:
+            tokens = _LOG_TOKENS_CACHE[path]
+        else:
+            tokens = []
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    t = self._tokenize_log_line(line)
+                    if t:
+                        tokens.append(t)
+            _LOG_TOKENS_CACHE[path] = tokens
+
         traces: Dict[str, Dict[str, Any]] = {}
         untraced: List[Dict[str, Any]] = []
 
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                t = self._tokenize_log_line(line)
-                if not t:
-                    continue
-                tr = t["trace_id"]
-                if tr:
-                    traces.setdefault(tr, {"keys": set(), "records": []})
-                    traces[tr]["keys"].update(t["subject_keys"])
-                    traces[tr]["records"].append(t)
-                else:
-                    untraced.append(t)
+        for t in tokens:
+            tr = t["trace_id"]
+            if tr:
+                traces.setdefault(tr, {"keys": set(), "records": []})
+                traces[tr]["keys"].update(t["subject_keys"])
+                traces[tr]["records"].append(t)
+            else:
+                untraced.append(t)
 
         def emit_log_record(t: Dict[str, Any], keys: Set[str]):
             ev = t["event"]
@@ -1075,4 +1128,18 @@ class EvidenceLoader:
             self._add_record(rec)
         except Exception as e:
             logger.warning(f"Error parsing image {file_id} ({path}): {e}. Skipping image.")
+
+    @classmethod
+    def precompute_caches(cls, dataset_dir: str):
+        """Precomputes and caches SQLite tables and log tokens in memory for rapid loading."""
+        dataset_dir = cls._resolve_dataset_dir(dataset_dir)
+        return cls(dataset_dir)
+
+    @classmethod
+    def clear_caches(cls):
+        """Clears in-memory caches."""
+        _SQL_TABLES_CACHE.clear()
+        _LOG_TOKENS_CACHE.clear()
+        _DATASET_CACHE.clear()
+
 
