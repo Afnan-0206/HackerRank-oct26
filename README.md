@@ -140,7 +140,14 @@ zip -r code.zip README.md code -x "*/__pycache__/*" "*/.venv/*" "*/venv/*" "*/no
 Compress-Archive -Path README.md, code -DestinationPath code.zip -Force
 ```
 
-When packaging `code.zip`:
+**Automated One-Click Pipeline & Verification:**
+
+To run tests, regenerate `output.csv`, validate schema invariants, cross-reference benchmark metrics, scan for leaked credentials, package `code.zip`, and perform an isolated clean-room reproduction test in one command:
+
+```bash
+python package_and_verify.py
+```
+
 
 - Keep your evaluation reports in `code/evaluation/` so they are bundled automatically with `code` (or add `evaluation` to the archive command above if you placed them in a top-level `evaluation/` directory).
 - Do **not** include `dataset/`, virtual environments (`.venv`, `venv`, `node_modules`), or build caches (`__pycache__`). On Windows, keep `.venv` at the repository root (outside `code/`) and remove any `code/__pycache__` folders before running `Compress-Archive`.

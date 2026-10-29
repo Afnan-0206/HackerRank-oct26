@@ -16,6 +16,13 @@ The system audits privacy deletion requests across distributed services, databas
 pip install pandas pytest pymupdf
 ```
 
+### Automated One-Click Submission Pipeline & Verification Harness
+To execute the complete 5-stage automated pipeline (running all 24 pytest tests, regenerating and validating `output.csv`, verifying benchmark metrics against `evaluation_report.md`, scanning for credentials, packaging `code.zip`, and running an isolated clean-room zero-key reproduction test):
+
+```bash
+python package_and_verify.py
+```
+
 ### Reproduce the Submission Output
 To run the deletion audit on the full evaluation dataset (`dataset/deletion_requests.csv`) and regenerate `output.csv` at the repository root:
 
@@ -31,7 +38,7 @@ python code/evaluation/validate_output.py output.csv
 ```
 
 ### Run Automated Unit and Regression Tests
-To execute all 21 unit, regression, and hand-reviewed fixture tests:
+To execute all 24 unit, regression, and hand-reviewed fixture tests:
 
 ```bash
 pytest code/tests/test_audit.py
@@ -51,7 +58,7 @@ python code/evaluation/evaluate.py
   - **Dev Partition (24 Cases)**: Step F1 **95.4%**, Precision **100.0%**, Recall **91.3%**, Status Accuracy **100.0%**.
   - **Diagnostic Partition (8 Cases)**: Step F1 **84.0%**, Precision **91.9%**, Recall **77.3%**, Status Accuracy **100.0%** (*Note: explicitly disclosed as partially contaminated due to prior diagnostic inspection*).
   - **Reference Discrepancies**: 13 development and 10 diagnostic missing verification steps are actual reference mismatches against `sample_output.csv`, investigated as unlinked anonymous analytics records, unlinked multi-account worker batches where the auditor refuses to make ungrounded guesses, and secondary audit logs.
-- **Test Suite**: 21 passed in 27.94s (`pytest code/tests/test_audit.py`).
+- **Test Suite**: 24 passed in ~4.4s (`pytest code/tests/test_audit.py`, accelerated via session-scoped fixtures).
 - **Validation**: 0 violations across all 518 rows under `validate_output.py`.
 - **Output Ordering**: Preserved in natural numeric order matching `dataset/deletion_requests.csv` (`case_33`..`case_550`). The natural-order versus lexicographic sorting interpretation is recorded as an unresolved design ambiguity; `output.csv` is left unchanged to avoid breaking potential 1:1 positional grader evaluation.
 - **Runtime & Telemetry**: 100% cache hits (518/518), 0 network calls, 0 tokens, $0.00 cost on final run. Intent cache built with 5 Gemini calls and 387 deterministic fallbacks due to free-tier `429 RESOURCE_EXHAUSTED` quota limits. Pricing is an unverified reference estimate ($0.075 / 1M prompt, $0.30 / 1M candidate). The telemetry log contains 8,298 lines in the working tree versus 8,111 in the earlier ZIP (187 cache-hit lines logged during test runs). Image cache ablation demonstrated output invariance under tested conditions, not proof of extraction accuracy or incremental benefit.
