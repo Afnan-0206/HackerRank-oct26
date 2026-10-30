@@ -46,7 +46,7 @@ The evaluator aligns steps using the structural key `(phase, operation, system_i
 | **Holdout Step F1 Score** | 84.0% | **91.4%** | **+7.4% absolute** |
 | **Aligned Evidence ID Accuracy** | 98.8% (168/170) | **100.0% (173/173)** | **+1.2% absolute (100% grounded)** |
 | **All-Steps Penalized Evidence ID** | 85.7% (168/196) | **89.6% (173/193)** | **+3.9% absolute** |
-| **Unit Test Suite** | 21 passed | **24 passed** | **+3 regression tests (session-scoped fixtures)** |
+| **Unit Test Suite** | 21 passed | **27 passed** | **+6 unit & regression tests (fixtures, backoff, Pydantic, fallback cascade)** |
 
 *\*Note on Holdout Set: All 32 sample cases have known reference answers in `sample_output.csv`. The 8 holdout cases (`case_04`, `case_08`, `case_12`, `case_16`, `case_20`, `case_24`, `case_28`, `case_32`) are designated as **partially contaminated** because error diagnosis during earlier baseline stages touched records linked to cases 08, 12, 16, 20, 24, etc. The reported 91.4% F1 represents diagnostic sample evaluation and must not be interpreted as independent validation on hidden test data.*
 
@@ -73,7 +73,7 @@ The full evaluation run over `dataset/deletion_requests.csv` was executed with t
 - `REMEDIATION` steps: **729 steps** (strictly citing `evidence_id=""`)
 - `VERIFICATION` steps: **1,391 steps** (post-remediation verification plans for incomplete cases, and verified absence/redaction for complete cases)
 - **Validation**: 0 violations across all 518 rows under `validate_output.py`.
-- **Test Suite**: 24 passed in ~4.4s (`pytest code/tests/test_audit.py`, accelerated via session-scoped fixtures).
+- **Test Suite**: 27 passed in ~8.2s (`pytest code/tests/test_audit.py`, covering unit, invariant, fixtures, Pydantic, and multi-provider cascade).
 - **Telemetry**: 518 cache hits (100%), 0 network calls, 0 network tokens, $0.00 cost.
 
 ---

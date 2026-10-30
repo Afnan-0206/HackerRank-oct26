@@ -16,6 +16,18 @@
     "prompt_token_rate_per_million": 0.15,
     "candidate_token_rate_per_million": 0.60
   },
+  "gpt-4o": {
+    "prompt_token_rate_per_million": 2.50,
+    "candidate_token_rate_per_million": 10.00
+  },
+  "claude-3-5-haiku-20241022": {
+    "prompt_token_rate_per_million": 0.80,
+    "candidate_token_rate_per_million": 4.00
+  },
+  "claude-3-haiku-20240307": {
+    "prompt_token_rate_per_million": 0.25,
+    "candidate_token_rate_per_million": 1.25
+  },
   "default": {
     "prompt_token_rate_per_million": 0.075,
     "candidate_token_rate_per_million": 0.30

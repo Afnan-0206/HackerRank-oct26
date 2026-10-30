@@ -834,6 +834,162 @@ def test_shared_fixtures_and_caching_speed(shared_evidence_loader, shared_identi
     assert len(reloaded_loader.records) == len(shared_evidence_loader.records)
 
 
+# 25. Test Exponential Backoff With Jitter & Transient Error Detection
+def test_backoff_retry_with_jitter_and_transient_detection():
+    try:
+        from code.model_layer import (
+            calculate_backoff_with_jitter,
+            is_transient_error,
+            is_hard_quota_exhausted,
+        )
+    except (ImportError, ValueError):
+        from model_layer import (
+            calculate_backoff_with_jitter,
+            is_transient_error,
+            is_hard_quota_exhausted,
+        )
+
+    # Backoff increases exponentially with attempt number
+    delays = [calculate_backoff_with_jitter(i, base_sec=1.0, max_sec=20.0, jitter_factor=0.2) for i in range(5)]
+    for i in range(len(delays) - 1):
+        assert delays[i] < delays[i + 1], f"Attempt {i} delay ({delays[i]}) should be < attempt {i+1} ({delays[i+1]})"
+
+    # Jitter variability between identical attempt levels
+    same_level_samples = [calculate_backoff_with_jitter(2, base_sec=2.0, jitter_factor=0.5) for _ in range(10)]
+    assert len(set(same_level_samples)) > 1, "Jitter must introduce non-zero variability"
+
+    # Maximum delay cap enforcement
+    capped_delay = calculate_backoff_with_jitter(10, base_sec=2.0, max_sec=12.5)
+    assert capped_delay <= 12.5, f"Delay {capped_delay} should be capped at max_sec 12.5"
+
+    # Transient error classification
+    assert is_transient_error("HTTP 429 Too Many Requests: Rate limit exceeded")
+    assert is_transient_error("503 Service Unavailable: Model is overloaded")
+    assert is_transient_error("Connection timed out after 30000ms")
+    assert not is_transient_error("401 Unauthorized: Invalid API key")
+
+    # Hard daily/credit quota classification
+    assert is_hard_quota_exhausted("ResourceExhausted: 429 GenerateContent requests per day limit exceeded")
+    assert is_hard_quota_exhausted("insufficient_quota: you exceeded your current quota")
+    assert not is_hard_quota_exhausted("429 Too Many Requests: Rate limit per minute")
+
+
+# 26. Test Pydantic Schema Validation for Model Layer Payloads
+def test_pydantic_schema_validation_model_layer():
+    try:
+        from code.model_layer import (
+            IntentClassificationPayload,
+            ImageExtractionPayload,
+            ImageResourceItem,
+            clean_and_parse_json,
+        )
+    except (ImportError, ValueError):
+        from model_layer import (
+            IntentClassificationPayload,
+            ImageExtractionPayload,
+            ImageResourceItem,
+            clean_and_parse_json,
+        )
+    from pydantic import ValidationError
+
+    # Valid intent payload
+    valid_intent = {
+        "requests_deletion": True,
+        "language": "French",
+        "evidence_quote": "veuillez supprimer mon compte",
+        "non_deletion_reason": None,
+    }
+    p_intent = IntentClassificationPayload.model_validate(valid_intent)
+    assert p_intent.requests_deletion is True
+    assert p_intent.language == "French"
+
+    # String boolean coercion in Pydantic
+    coerced_intent = IntentClassificationPayload.model_validate({
+        "requests_deletion": "False",
+        "language": "English",
+        "evidence_quote": "keep my account active",
+        "non_deletion_reason": "explicit retention",
+    })
+    assert coerced_intent.requests_deletion is False
+
+    # Invalid intent payload raises ValidationError
+    with pytest.raises(ValidationError):
+        IntentClassificationPayload.model_validate({
+            "requests_deletion": "not_a_bool_or_int",
+            "language": 123,
+        })
+
+    # Image extraction validation & defaults
+    img_data = {
+        "system_id": "auth_admin_console",
+        "resources": [
+            {
+                "resource_id": "account_999",
+                "record_type": "USER_RECORD",
+                "email": "user999@example.com",
+                "status": "DELETED",
+            }
+        ],
+    }
+    p_img = ImageExtractionPayload.model_validate(img_data)
+    assert p_img.system_id == "auth_admin_console"
+    assert len(p_img.resources) == 1
+    assert p_img.resources[0].resource_id == "account_999"
+    assert p_img.resources[0].status == "DELETED"
+    assert p_img.resources[0].details == {}
+
+    # JSON cleaner handles markdown fences and commentary
+    fence_json = "```json\n{\"system_id\": \"db_console\", \"resources\": []}\n```"
+    assert clean_and_parse_json(fence_json)["system_id"] == "db_console"
+
+
+# 27. Test Multi-Provider Fallback Cascade and Hard Quota Recovery
+def test_multi_provider_fallback_cascade_and_quota_recovery(tmp_path):
+    try:
+        from code.model_layer import ModelLayer
+    except (ImportError, ValueError):
+        from model_layer import ModelLayer
+    from unittest.mock import patch
+    import time
+
+    # Use isolated temporary cache directory to preserve production intent_cache.json
+    ml = ModelLayer(cache_dir=str(tmp_path))
+
+    # 1. Verification of default cascade ends with deterministic
+    cascade = ml.get_fallback_cascade()
+    assert cascade[-1][0] == "deterministic"
+
+    # 2. Hard quota on Gemini triggers immediate cascade to deterministic (when OpenAI unset)
+    ml._exhausted_providers.clear()
+    uncached_text_1 = "Please delete all my stored personal records completely."
+    with patch.object(ml, "_call_gemini_intent", side_effect=Exception("429 ResourceExhausted: requests per day limit exceeded")):
+        res = ml.classify_intent(uncached_text_1)
+        assert res["requests_deletion"] is True
+        assert "gemini" in ml._exhausted_providers
+
+    # 3. When OpenAI key is configured and Gemini is exhausted, cascade reaches OpenAI
+    ml._exhausted_providers.clear()
+    uncached_text_2 = "Por favor eliminar mis datos."
+    mock_openai_payload = {
+        "requests_deletion": True,
+        "language": "Spanish",
+        "evidence_quote": "eliminar mis datos",
+        "non_deletion_reason": None,
+    }
+    with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-mock-key-for-test"}):
+        cascade_with_openai = ml.get_fallback_cascade()
+        provider_names = [p for p, _ in cascade_with_openai]
+        assert "openai" in provider_names
+
+        with patch.object(ml, "_call_gemini_intent", side_effect=Exception("429 ResourceExhausted: daily quota exceeded")):
+            with patch.object(ml, "_call_openai_intent", return_value=(mock_openai_payload, 60, 25, 85, 0)) as mock_openai:
+                res = ml.classify_intent(uncached_text_2)
+                assert res["requests_deletion"] is True
+                assert res["language"] == "Spanish"
+                assert mock_openai.called
+
+
+
 
 
 
