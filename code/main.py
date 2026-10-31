@@ -1,6 +1,7 @@
 """
 Ghost Data Still Exists - Main CLI Entry Point.
 Audits all requests in dataset/deletion_requests.csv and emits root output.csv.
+Supports multi-core vectorized batch processing via concurrent.futures.ProcessPoolExecutor.
 """
 
 import os
@@ -8,8 +9,9 @@ import sys
 import argparse
 import time
 from pathlib import Path
+from typing import List, Tuple, Dict, Any, Optional
+from concurrent.futures import ProcessPoolExecutor
 import pandas as pd
-from typing import List
 
 # Ensure repository root is on sys.path
 repo_root = str(Path(__file__).resolve().parent.parent)
@@ -27,6 +29,36 @@ except ImportError:
     from emitter import OutputEmitter
     from model_layer import ModelLayer
 
+# Global worker handles for ProcessPoolExecutor
+_worker_auditor: Optional[DeletionAuditor] = None
+_worker_model_layer: Optional[ModelLayer] = None
+
+
+def _init_worker(dataset_dir: str, pricing_config: str, auditor_instance: Optional[DeletionAuditor] = None):
+    """Initializes per-worker in-memory auditor and model layer instances."""
+    global _worker_auditor, _worker_model_layer
+    _worker_auditor = auditor_instance if auditor_instance is not None else DeletionAuditor(dataset_dir)
+    _worker_model_layer = ModelLayer(pricing_config_path=pricing_config)
+
+
+def _audit_case_batch(batch: List[Dict[str, Any]]) -> List[Tuple[str, DeletionStatus, List[Step]]]:
+    """Processes a vectorized batch of requests within a worker process."""
+    global _worker_auditor, _worker_model_layer
+    out = []
+    for row in batch:
+        req = DeletionRequest(
+            case_id=str(row["case_id"]),
+            email=str(row["email"]),
+            requested_at=str(row["requested_at"]),
+            reported_status=str(row["reported_status"]),
+            reported_at=str(row["reported_at"]),
+            audit_at=str(row["audit_at"]),
+            request_text=str(row["request_text"]),
+        )
+        status, steps = _worker_auditor.audit_case(req, model_layer=_worker_model_layer)
+        out.append((req.case_id, status, steps))
+    return out
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Ghost Data Still Exists Deletion Audit System")
@@ -36,6 +68,8 @@ def parse_args():
     parser.add_argument("--limit", type=int, default=None, help="Limit number of cases to process")
     parser.add_argument("--pricing-config", default="code/pricing_config.json", help="Path to pricing config")
     parser.add_argument("--usage-report", default=None, help="Optional path to write usage report (default None preserves curated reports)")
+    parser.add_argument("--workers", "-w", type=int, default=None, help="Number of worker processes for batching (default: auto, or 1 for sequential)")
+    parser.add_argument("--batch-size", "-b", type=int, default=32, help="Chunk batch size per worker task (default: 32)")
     return parser.parse_args()
 
 
@@ -45,7 +79,9 @@ def run_pipeline(
     requests_file: str = None,
     limit: int = None,
     pricing_config: str = "code/pricing_config.json",
-    usage_report: str = None
+    usage_report: str = None,
+    workers: Optional[int] = None,
+    batch_size: int = 32
 ):
     start_time = time.time()
     
@@ -58,68 +94,88 @@ def run_pipeline(
         
     print(f"Loading deletion requests from: {requests_file}")
     req_df = pd.read_csv(requests_file)
-    total_cases = len(req_df)
-    print(f"Total requests to process: {total_cases}")
-    
     if limit:
         req_df = req_df.head(limit)
         print(f"Limited processing to first {len(req_df)} cases")
 
-    # Initialize auditor and model layer
-    print(f"Initializing DeletionAuditor with dataset: {dataset_dir} ...")
-    auditor = DeletionAuditor(dataset_dir)
+    req_dicts = req_df.to_dict(orient="records")
+    total_cases = len(req_dicts)
+    print(f"Total requests to process: {total_cases}")
+
+    # Determine execution strategy (sequential vs multi-core ProcessPoolExecutor)
+    if workers is None:
+        cpu_cnt = os.cpu_count() or 4
+        workers = min(cpu_cnt, 8) if total_cases > 64 else 1
+
     emitter = OutputEmitter()
-    model_layer = ModelLayer(pricing_config_path=pricing_config)
-    
-    run_start_idx = len(model_layer.telemetry.records)
     results = []
+    batch_elapsed = 0.0
+
+    if workers > 1:
+        batches = [req_dicts[i:i + batch_size] for i in range(0, total_cases, batch_size)]
+        print(f"Auditing cases across {workers} worker processes ({len(batches)} batches, size={batch_size})...")
+        t_batch_start = time.time()
+        with ProcessPoolExecutor(max_workers=workers, initializer=_init_worker, initargs=(dataset_dir, pricing_config)) as executor:
+            batch_results = list(executor.map(_audit_case_batch, batches))
+        batch_elapsed = time.time() - t_batch_start
+        results = [item for sublist in batch_results for item in sublist]
+    else:
+        print(f"Auditing cases sequentially in single process...")
+        auditor = DeletionAuditor(dataset_dir)
+        model_layer = ModelLayer(pricing_config_path=pricing_config)
+        t_batch_start = time.time()
+        for idx, row in enumerate(req_dicts):
+            req = DeletionRequest(
+                case_id=str(row["case_id"]),
+                email=str(row["email"]),
+                requested_at=str(row["requested_at"]),
+                reported_status=str(row["reported_status"]),
+                reported_at=str(row["reported_at"]),
+                audit_at=str(row["audit_at"]),
+                request_text=str(row["request_text"]),
+            )
+            status, steps = auditor.audit_case(req, model_layer=model_layer)
+            results.append((req.case_id, status, steps))
+            if (idx + 1) % 50 == 0 or (idx + 1) == total_cases:
+                print(f"  Processed {idx + 1}/{total_cases} cases...")
+        batch_elapsed = time.time() - t_batch_start
+
     status_counts = {
         DeletionStatus.COMPLETE: 0,
         DeletionStatus.INCOMPLETE: 0,
         DeletionStatus.NOT_APPLICABLE: 0,
     }
-    
     total_steps = 0
-    print("Auditing cases with active Intent Gate...")
-    for idx, row in req_df.iterrows():
-        req = DeletionRequest(
-            case_id=str(row["case_id"]),
-            email=str(row["email"]),
-            requested_at=str(row["requested_at"]),
-            reported_status=str(row["reported_status"]),
-            reported_at=str(row["reported_at"]),
-            audit_at=str(row["audit_at"]),
-            request_text=str(row["request_text"]),
-        )
-        status, steps = auditor.audit_case(req, model_layer=model_layer)
-        results.append((req.case_id, status, steps))
+    for cid, status, steps in results:
         status_counts[status] += 1
         total_steps += len(steps)
-        
-        if (idx + 1) % 50 == 0 or (idx + 1) == len(req_df):
-            print(f"  Processed {idx + 1}/{len(req_df)} cases...")
 
     # Write output CSV
     print(f"Writing output CSV to: {output_csv}")
     emitter.write_csv(output_csv, results)
     
-    # Generate Telemetry & Usage Report if explicitly requested
-    run_records = model_layer.telemetry.records[run_start_idx:]
+    # Telemetry tracker in main process for usage report and cost summary
+    main_model_layer = ModelLayer(pricing_config_path=pricing_config)
+    run_records = main_model_layer.telemetry.records[-total_cases:] if main_model_layer.telemetry.records else []
     if usage_report:
         print(f"Generating usage and cost report from this run to: {usage_report}")
-        model_layer.telemetry.generate_usage_report(usage_report, run_records=run_records)
+        main_model_layer.telemetry.generate_usage_report(usage_report, run_records=run_records)
     else:
         print("Curated reports preserved (pass --usage-report <path> to write run telemetry report)")
-    
+
     elapsed = time.time() - start_time
-    summary = model_layer.telemetry.get_summary(run_records)
+    summary = main_model_layer.telemetry.get_summary(run_records)
+    audit_throughput = total_cases / batch_elapsed if batch_elapsed > 0 else 0.0
+    overall_throughput = total_cases / elapsed if elapsed > 0 else 0.0
+
     print("\n================ AUDIT SUMMARY ================")
     print(f"Total Cases Processed: {len(results)}")
     print(f"COMPLETE:             {status_counts[DeletionStatus.COMPLETE]}")
     print(f"INCOMPLETE:           {status_counts[DeletionStatus.INCOMPLETE]}")
     print(f"NOT_APPLICABLE:       {status_counts[DeletionStatus.NOT_APPLICABLE]}")
     print(f"Total Steps Emitted:  {total_steps}")
-    print(f"Elapsed Time:         {elapsed:.2f}s ({len(results)/elapsed:.1f} cases/sec)")
+    print(f"Audit Batch Time:     {batch_elapsed:.2f}s ({audit_throughput:.1f} cases/sec)")
+    print(f"Total Pipeline Time:  {elapsed:.2f}s ({overall_throughput:.1f} cases/sec)")
     print(f"Output File:          {output_csv} ({os.path.getsize(output_csv)} bytes)")
     print("\n============== TELEMETRY & COST ===============")
     print(f"Total Model Calls:    {summary['total_calls']}")
@@ -140,5 +196,7 @@ if __name__ == "__main__":
         requests_file=args.requests_file,
         limit=args.limit,
         pricing_config=args.pricing_config,
-        usage_report=args.usage_report
+        usage_report=args.usage_report,
+        workers=args.workers,
+        batch_size=args.batch_size
     )

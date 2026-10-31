@@ -7,6 +7,7 @@ policy evaluation, and strict step sequencing.
 import os
 import re
 import json
+from datetime import datetime, timedelta
 import pandas as pd
 from typing import List, Dict, Tuple, Optional, Set, Any
 try:
@@ -90,6 +91,13 @@ class DeletionAuditor:
             for res, ev_type in zip(self.del_workers["resource_id"].tolist(), self.del_workers["event_type"].tolist()):
                 if pd.notna(res) and res:
                     self.res_policy_map[str(res)] = str(ev_type)
+
+        # Pre-index deletion worker records for fast window filtering without repeated dataframe queries
+        self.del_workers_records: List[Tuple[str, str]] = []
+        if not self.del_workers.empty:
+            for ev_time, res_id in zip(self.del_workers["event_time"].tolist(), self.del_workers["resource_id"].tolist()):
+                if res_id and pd.notna(res_id):
+                    self.del_workers_records.append((str(ev_time).strip(), str(res_id).strip()))
 
         # Pre-filter LINK events as dict records for fast candidate discovery
         self.link_event_records = self.activity_df[
@@ -217,14 +225,21 @@ class DeletionAuditor:
         # 3c. (Synthetic fallback removed)
 
         # 3d. Check deletion worker window around reported_at
-        rep_dt = pd.to_datetime(req.reported_at)
-        w_start = (rep_dt - pd.Timedelta(hours=2)).strftime('%Y-%m-%dT%H:%M:%SZ')
-        w_end = (rep_dt + pd.Timedelta(minutes=15)).strftime('%Y-%m-%dT%H:%M:%SZ')
-        sub_w = self.del_workers[(self.del_workers["event_time"] >= w_start) & (self.del_workers["event_time"] <= w_end)]
+        try:
+            dt = datetime.fromisoformat(req.reported_at.replace("Z", "+00:00"))
+            w_start = (dt - timedelta(hours=2)).strftime('%Y-%m-%dT%H:%M:%SZ')
+            w_end = (dt + timedelta(minutes=15)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        except Exception:
+            rep_dt = pd.to_datetime(req.reported_at)
+            w_start = (rep_dt - pd.Timedelta(hours=2)).strftime('%Y-%m-%dT%H:%M:%SZ')
+            w_end = (rep_dt + pd.Timedelta(minutes=15)).strftime('%Y-%m-%dT%H:%M:%SZ')
         
         has_account = any(res.startswith("account_") for res in candidate_resources)
         if not has_account:
-            w_accs = sub_w[sub_w["resource_id"].str.startswith("account_")]["resource_id"].tolist()
+            w_accs = [
+                res_id for ev_time, res_id in self.del_workers_records
+                if w_start <= ev_time <= w_end and res_id.startswith("account_")
+            ]
             if len(w_accs) == 1:
                 candidate_resources.add(w_accs[0])
             elif len(w_accs) > 1:
